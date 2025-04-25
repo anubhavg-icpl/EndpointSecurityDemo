@@ -100,6 +100,6 @@ For enterprise deployments, we recommend establishing:
 
 ## Legal Notice
 
-Copyright (c) 2024-2025Anubhav Gain
+Copyright (c) 2024-2025 Anubhav Gain
 
 This software is provided under the MIT License. Use of this software implies acceptance of all terms outlined in the LICENSE.txt file.
