@@ -11,21 +11,19 @@
 //  Updated by Omar Ikram on 08/01/2022 - macOS Monterey 12.1 (21C52)
 //  Updated by Omar Ikram on 15/02/2022 - macOS Monterey 12.2.1 (21D62)
 //  Updated by Omar Ikram on 04/01/2025 - macOS Sequoia 15.2 (24C101)
+//  Enhanced with Gatekeeper and XProtect features
 //
 
 /*
  
- A demo of using Apple's EndpointSecurity framework - tested on macOS Sequoia 15.2 (24C101).
+ A demo of using Apple's EndpointSecurity framework with Gatekeeper and XProtect enhancements
+ - tested on macOS Sequoia 15.2 (24C101).
  
  Minimum supported version: macOS Catalina 10.15
  
  This demo is an update of previous demos, which has been updated to support the latest API changes
- Apple has made for macOS Sequoia 15.
- 
- The demo has also been expanded significantly to include more detail and cover more of the API.
- 
- The code, hopefully, should be self explanatory. Important details are marked by a comment
- starting with "Note:".
+ Apple has made for macOS Sequoia 15 plus additional security features that emulate and extend
+ Gatekeeper and XProtect functionality.
  
  Disclaimer:
  This code is provided as is and is only intended to be used for illustration purposes. This code is
@@ -43,13 +41,6 @@
 
  3. Codesign with entitlement 'com.apple.developer.endpoint-security.client'.
  
- If your Apple Developer account has been granted the entitlement from Apple, then the program needs
- to be compiled as an App (i.e. Application Bundle). This will allow you to assign a Provisioning
- Profile to the program, which you need to have associated the entitlement to it.
- 
- If you have not been granted the entitlement. You can still build the program (as an App or Command
- Line Tool), but it will only be able to run on a machine which has SIP disabled (best to use a VM).
- 
  Runtime:
  1. Test environment should be a macOS 10.15+ machine.
  2. Run the demo binary in a terminal as root (e.g. with sudo).
@@ -58,16 +49,11 @@
          the example serial event message handler.
     iii) Running with the 'asynchronous' argument will run the demo using
          the example asynchronous event message handler.
-    iv) Adding the 'verbose' argument at the end will turn on verbose logging.
- 3. Terminal will display messages related to subscribed events.
- 4. The demo will demonstrate processing Endpoint Security event messages
-    serially or asynchronously (depending on the selected command line argument given).
-    
-    The demo will also demonstrate using Endpoint Security Auth events to make the
-    following Auth based decisions:
-       i)  Block the 'top' binary and 'Calculator' app bundle from running.
-       ii) Block 'vim' binary from reading plain text files.
- 5. CTL-C to exit.
+    iv)  Running with the 'gatekeeper' argument will run the demo with enhanced
+         Gatekeeper simulation and monitoring features.
+    v)   Running with the 'xprotect' argument will run the demo with XProtect
+         simulation and monitoring features.
+    vi)  Adding the 'verbose' argument at the end will turn on verbose logging.
  
  */
 
@@ -80,6 +66,39 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <Appkit/AppKit.h>
 #import <libproc.h>
+#import <CommonCrypto/CommonDigest.h>
+#import <Security/Security.h>
+
+#pragma mark - Forward Declarations
+
+// Forward declarations for functions and logging macros
+NSString* esstring_to_nsstring(const es_string_token_t es_string_token);
+void log_event_message(const es_message_t *msg);
+
+#pragma mark - Logging
+
+#define BOOL_VALUE(x) x ? "Yes" : "No"
+
+int g_log_indent = 0;
+#define LOG_INDENT_INC() {g_log_indent += 2;}
+#define LOG_INDENT_DEC() {g_log_indent -= 2;}
+
+#define LOG_IMPORTANT_INFO(fmt, ...) NSLog(@"*** " fmt @" ***", ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...) NSLog(@"%*s" fmt, g_log_indent, "", ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) NSLog(@"ERROR: " fmt, ##__VA_ARGS__)
+#define LOG_SECURITY(fmt, ...) NSLog(@"SECURITY: " fmt, ##__VA_ARGS__)
+
+#define LOG_VERBOSE_EVENT_MESSAGE(msg) {        \
+    if(g_verbose_logging) {                     \
+        log_event_message(msg);                 \
+    }                                           \
+}
+
+#define LOG_NON_VERBOSE_EVENT_MESSAGE(msg) {    \
+    if(!g_verbose_logging) {                    \
+        log_event_message(msg);                 \
+    }                                           \
+}
 
 #pragma mark Globals
 
@@ -102,16 +121,63 @@ bool g_cache_auth_results = false;
 // otherwise only denied Auth event messages will be logged.
 bool g_verbose_logging = false;
 
+// Enable enhanced Gatekeeper functionality
+bool g_gatekeeper_mode = false;
+
+// Enable enhanced XProtect functionality
+bool g_xprotect_mode = false;
+
+// Store for known malicious file hashes (simplified XProtect)
+NSMutableSet *g_malicious_hashes = nil;
+
+// Suspicious behaviors mapping (process_path -> count)
+NSMutableDictionary *g_suspicious_behaviors = nil;
+
+// Quarantine status cache (path -> is_quarantined)
+NSMutableDictionary *g_quarantine_status = nil;
+
+// Shared preferences dictionary for security policy
+NSMutableDictionary *g_security_preferences = nil;
+
+// Notification queue for security events
+dispatch_queue_t g_notification_queue = nil;
+
+#pragma mark Enhanced Security Policies
+
+// XProtect simulation - list of suspicious file extensions to monitor
+NSSet *g_suspicious_extensions = nil;
+
+// Gatekeeper simulation - notarization requirements by path
+// 0 = disabled, 1 = developer ID signed, 2 = App Store only
+NSMutableDictionary *g_notarization_requirements = nil;
+
+#pragma mark Enhanced Security Constants
+
+// Suspicious behavior threshold before taking action
+#define SUSPICIOUS_BEHAVIOR_THRESHOLD 3
+
+// Quarantine extended attribute name
+#define QUARANTINE_ATTR_NAME "com.apple.quarantine"
+
+// Gatekeeper policy levels
+typedef NS_ENUM(NSUInteger, GatekeeperPolicyLevel) {
+    GatekeeperPolicyDisabled = 0,
+    GatekeeperPolicyDeveloperIDSigned = 1,
+    GatekeeperPolicyAppStoreOnly = 2
+};
+
+// XProtect threat levels
+typedef NS_ENUM(NSUInteger, ThreatLevel) {
+    ThreatLevelNone = 0,
+    ThreatLevelSuspicious = 1,
+    ThreatLevelMalicious = 2
+};
+
 #pragma mark Helpers - Mach Absolute Time
 
 // This could be running on either Apple Silicon or Intel based CPUs.
 // We will need to apply timebase information when converting Mach absolute time to nanoseconds:
 // https://developer.apple.com/documentation/apple_silicon/addressing_architectural_differences_in_your_macos_code#3616875
-//
-// Note: Running x86_64 code running under Rosetta 2 will have timebase information for Intel CPUs.
-// This will cause discrepancies when converting Mach absolute time values from Endpoint Security Messages.
-// The best option would be to compile your client as a universal binary:
-// https://developer.apple.com/documentation/xcode/building_a_universal_macos_binary
 uint64_t MachTimeToNanoseconds(uint64_t machTime) {
     uint64_t nanoseconds = 0;
     static mach_timebase_info_data_t sTimebase;
@@ -161,6 +227,212 @@ NSString* codesigning_flags_str(const uint32_t codesigning_flags) {
     }
     
     return [match_flags componentsJoinedByString:@","];
+}
+
+// Check if a process is validly signed according to Gatekeeper policy
+bool is_validly_signed(const es_process_t* proc, GatekeeperPolicyLevel policy_level) {
+    if (policy_level == GatekeeperPolicyDisabled) {
+        return true;
+    }
+    
+    // Check if binary is a platform binary (Apple-signed)
+    bool is_apple_binary = (proc->codesigning_flags & CS_PLATFORM_BINARY) == CS_PLATFORM_BINARY;
+    
+    // Check if binary has a valid signature
+    bool is_validly_signed = (proc->codesigning_flags & CS_VALID) == CS_VALID;
+    
+    // Check if the signature was validated (not ad-hoc)
+    bool not_adhoc = (proc->codesigning_flags & CS_ADHOC) != CS_ADHOC;
+    
+    if (is_apple_binary) {
+        // Always allow Apple binaries
+        return true;
+    }
+    
+    // Get the team ID (used for Developer ID validation)
+    NSString *team_id = esstring_to_nsstring(proc->team_id);
+    
+    // For App Store only policy, check for specific flags
+    if (policy_level == GatekeeperPolicyAppStoreOnly) {
+        // App Store apps have specific validation flags
+        // This is a simplified check - real implementation would be more robust
+        return is_validly_signed && not_adhoc &&
+               (proc->codesigning_flags & CS_RESTRICT) == CS_RESTRICT;
+    }
+    
+    // For Developer ID policy, check valid signature and not adhoc
+    if (policy_level == GatekeeperPolicyDeveloperIDSigned) {
+        return is_validly_signed && not_adhoc && team_id.length > 0;
+    }
+    
+    return false;
+}
+
+// Check if an app has been notarized
+bool is_notarized(const es_process_t* proc) {
+    // In a real implementation, you would check for the hardened runtime flag
+    // and validate that the app has been notarized using the Security framework
+    // This is a simplified implementation
+    return (proc->codesigning_flags & CS_RUNTIME) == CS_RUNTIME;
+}
+
+#pragma mark Helpers - Security Features
+
+// Calculate SHA256 hash of a file
+NSString* calculate_file_hash(const char* path) {
+    NSData *data = [NSData dataWithContentsOfFile:@(path) options:NSDataReadingMappedIfSafe error:nil];
+    if (!data) {
+        return nil;
+    }
+    
+    unsigned char hash[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, hash);
+    
+    NSMutableString *hashString = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+        [hashString appendFormat:@"%02x", hash[i]];
+    }
+    
+    return [hashString copy];
+}
+
+// Check if file is quarantined
+bool is_file_quarantined(const char* path) {
+    NSString *nsPath = @(path);
+    
+    // Check cache first
+    if (g_quarantine_status[nsPath] != nil) {
+        return [g_quarantine_status[nsPath] boolValue];
+    }
+    
+    // Read extended attribute
+    const char *name = QUARANTINE_ATTR_NAME;
+    ssize_t size = getxattr(path, name, NULL, 0, 0, 0);
+    bool isQuarantined = (size > 0);
+    
+    // Cache the result
+    g_quarantine_status[nsPath] = @(isQuarantined);
+    
+    return isQuarantined;
+}
+
+// Get quarantine data
+NSDictionary* get_quarantine_data(const char* path) {
+    const char *name = QUARANTINE_ATTR_NAME;
+    ssize_t size = getxattr(path, name, NULL, 0, 0, 0);
+    
+    if (size <= 0) {
+        return nil;
+    }
+    
+    char *buffer = malloc(size);
+    if (!buffer) {
+        return nil;
+    }
+    
+    getxattr(path, name, buffer, size, 0, 0);
+    NSString *qdata = [[NSString alloc] initWithBytes:buffer length:size encoding:NSUTF8StringEncoding];
+    free(buffer);
+    
+    if (!qdata) {
+        return nil;
+    }
+    
+    // Parse quarantine data - format is typically:
+    // 0083;5f5e196e;Safari;6489CA8E-FC5E-4C0C-9F22-609C7C7D9F6F
+    NSArray *components = [qdata componentsSeparatedByString:@";"];
+    if (components.count < 4) {
+        return nil;
+    }
+    
+    return @{
+        @"flag": components[0],
+        @"timestamp": components[1],
+        @"agent": components[2],
+        @"uuid": components[3]
+    };
+}
+
+// Record suspicious behavior
+void record_suspicious_behavior(const es_process_t* proc) {
+    NSString *path = esstring_to_nsstring(proc->executable->path);
+    NSNumber *count = g_suspicious_behaviors[path];
+    
+    if (count == nil) {
+        count = @(1);
+    } else {
+        count = @([count intValue] + 1);
+    }
+    
+    g_suspicious_behaviors[path] = count;
+    
+    if ([count intValue] >= SUSPICIOUS_BEHAVIOR_THRESHOLD) {
+        LOG_IMPORTANT_INFO("Process has triggered multiple suspicious behavior alerts: %@", path);
+    }
+}
+
+// Check if file has a suspicious extension
+bool has_suspicious_extension(const NSString* path) {
+    NSString *extension = [path pathExtension].lowercaseString;
+    return [g_suspicious_extensions containsObject:extension];
+}
+
+// Get executable file access permissions
+bool can_execute(const es_file_t* file) {
+    mode_t mode = file->stat.st_mode;
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+    
+    if (uid == 0) {
+        // Root can execute anything
+        return true;
+    }
+    
+    if (uid == file->stat.st_uid) {
+        // User is owner
+        return (mode & S_IXUSR) != 0;
+    } else if (gid == file->stat.st_gid) {
+        // User is in the file's group
+        return (mode & S_IXGRP) != 0;
+    } else {
+        // Other
+        return (mode & S_IXOTH) != 0;
+    }
+}
+
+// Check if a file might be malware based on content analysis
+ThreatLevel analyze_file_threat_level(const char* path) {
+    // In a real implementation, this would use XProtect's signatures and analysis
+    // For this demo, we'll use a simple hash lookup and extension check
+    
+    // Check file hash against known malicious hashes
+    NSString *fileHash = calculate_file_hash(path);
+    if (fileHash && [g_malicious_hashes containsObject:fileHash]) {
+        return ThreatLevelMalicious;
+    }
+    
+    // Check file extension
+    NSString *filePath = @(path);
+    if (has_suspicious_extension(filePath)) {
+        return ThreatLevelSuspicious;
+    }
+    
+    return ThreatLevelNone;
+}
+
+// Send a security notification
+void send_security_notification(NSString *title, NSString *message, bool is_critical) {
+    dispatch_async(g_notification_queue, ^{
+        NSUserNotification *notification = [[NSUserNotification alloc] init];
+        notification.title = title;
+        notification.informativeText = message;
+        notification.soundName = is_critical ? NSUserNotificationDefaultSoundName : nil;
+        
+        [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
+        
+        // Log the notification as well
+        LOG_IMPORTANT_INFO("SECURITY ALERT: %@ - %@", title, message);
+    });
 }
 
 #pragma mark Helpers - Endpoint Security
@@ -355,30 +627,6 @@ char* filetype_str(const mode_t st_mode) {
         case S_IFSOCK: return "SOCK";
         default: return "";
     }
-}
-
-#pragma mark - Logging
-
-#define BOOL_VALUE(x) x ? "Yes" : "No"
-
-int g_log_indent = 0;
-#define LOG_INDENT_INC() {g_log_indent += 2;}
-#define LOG_INDENT_DEC() {g_log_indent -= 2;}
-
-#define LOG_IMPORTANT_INFO(fmt, ...) NSLog(@"*** " @#fmt @" ***", ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...) NSLog(@"%*s" @#fmt, g_log_indent, "", ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) NSLog(@"ERROR: " @#fmt, ##__VA_ARGS__)
-
-#define LOG_VERBOSE_EVENT_MESSAGE(msg) {        \
-    if(g_verbose_logging) {                     \
-        log_event_message(msg);                 \
-    }                                           \
-}
-
-#define LOG_NON_VERBOSE_EVENT_MESSAGE(msg) {    \
-    if(!g_verbose_logging) {                    \
-        log_event_message(msg);                 \
-    }                                           \
 }
 
 void log_audit_token(const NSString* header, const audit_token_t audit_token) {
@@ -624,11 +872,6 @@ void log_event_message(const es_message_t *msg) {
    
     // Note: It's very important that an auth event is processed within the deadline:
     // https://developer.apple.com/documentation/endpointsecurity/es_message_t/3334985-deadline
-    // From an Apple Security Engineer:
-    //  "You must respond by the deadline.
-    //  It is not configurable.
-    //  It won't get longer, but it will get shorter."
-    // https://developer.apple.com/forums/thread/649552?answerId=615802022#615802022
     LOG_INFO("deadline: %llu", msg->deadline);
     
     uint64_t deadlineInterval = msg->deadline;
@@ -673,6 +916,51 @@ void log_event_message(const es_message_t *msg) {
             
         case ES_EVENT_TYPE_NOTIFY_FORK: {
             log_proc(version, @"event.fork.child", msg->event.fork.child);
+        }
+            break;
+            
+        case ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE: {
+            // Available in macOS 15+ - monitor user overrides of Gatekeeper decisions
+            if (@available(macOS 15.0, *)) {
+                // The exact structure format depends on the Apple SDK
+                // This is a simplified version
+                LOG_SECURITY("Gatekeeper override detected");
+                
+                // Log when a user overrides Gatekeeper to allow an unsigned app
+                send_security_notification(@"Gatekeeper Override",
+                                         @"User overrode Gatekeeper protection",
+                                         true);
+            }
+        }
+            break;
+            
+        case ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED: {
+            // Available in macOS 13+ - monitor XProtect malware detections
+            if (@available(macOS 13.0, *)) {
+                // The exact structure format depends on the Apple SDK
+                // This is a simplified version
+                LOG_SECURITY("XProtect detected malware");
+                
+                // Alert on XProtect detections
+                send_security_notification(@"Malware Detected",
+                                         @"XProtect detected malware",
+                                         true);
+            }
+        }
+            break;
+            
+        case ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED: {
+            // Available in macOS 13+ - monitor XProtect malware remediations
+            if (@available(macOS 13.0, *)) {
+                // The exact structure format depends on the Apple SDK
+                // This is a simplified version
+                LOG_SECURITY("XProtect remediated malware");
+                
+                // Alert on XProtect remediations
+                send_security_notification(@"Malware Remediated",
+                                         @"XProtect remediated malware",
+                                         false);
+            }
         }
             break;
             
@@ -723,27 +1011,140 @@ void detect_and_log_dropped_events(const es_message_t *msg) {
     }
 }
 
-#pragma mark - Endpoint Secuirty Demo
+#pragma mark - Security Handlers
 
-// Clean-up before exiting
-void sig_handler(int sig) {
-    LOG_IMPORTANT_INFO("Tidying Up");
-    
-    if(g_client) {
-        es_unsubscribe_all(g_client);
-        es_delete_client(g_client);
+// Enhanced handler for Gatekeeper-style checks
+es_auth_result_t gatekeeper_auth_handler(const es_message_t *msg) {
+    // We're only interested in execution events for Gatekeeper functionality
+    if (ES_EVENT_TYPE_AUTH_EXEC != msg->event_type) {
+        return ES_AUTH_RESULT_ALLOW;
     }
     
-    LOG_IMPORTANT_INFO("Exiting");
-    exit(EXIT_SUCCESS);
+    // Get the path of the file being executed
+    NSString *path = esstring_to_nsstring(msg->event.exec.target->executable->path);
+    
+    // Check if we have a specific notarization requirement for this path
+    NSNumber *requirementLevel = [g_notarization_requirements objectForKey:path];
+    
+    // If no specific requirement, use default (developer ID signed)
+    GatekeeperPolicyLevel policyLevel = requirementLevel ?
+                                      [requirementLevel intValue] :
+                                      GatekeeperPolicyDeveloperIDSigned;
+    
+    // Skip checking system binaries
+    if (msg->event.exec.target->is_platform_binary) {
+        return ES_AUTH_RESULT_ALLOW;
+    }
+    
+    // Check for quarantine flag
+    bool quarantined = is_file_quarantined(msg->event.exec.target->executable->path.data);
+    
+    // If file is quarantined, apply stricter checks
+    if (quarantined) {
+        LOG_SECURITY("Quarantined file execution attempt: %@", path);
+        
+        // Check if validly signed according to policy
+        bool validly_signed = is_validly_signed(msg->event.exec.target, policyLevel);
+        
+        // Check if notarized (for apps requiring it)
+        bool notarized = is_notarized(msg->event.exec.target);
+        
+        // For quarantined files, we want both valid signature and notarization
+        if (!validly_signed || (policyLevel >= GatekeeperPolicyDeveloperIDSigned && !notarized)) {
+            LOG_SECURITY("BLOCKING EXEC (Gatekeeper): Quarantined file lacks proper signing/notarization: %@", path);
+            
+            // Send notification
+            send_security_notification(@"Execution Blocked",
+                                     [NSString stringWithFormat:@"Blocked execution of unsigned/unnotarized app: %@", path],
+                                     true);
+            
+            return ES_AUTH_RESULT_DENY;
+        }
+        
+        // Log successful validation
+        LOG_SECURITY("Allowed quarantined file execution (validated): %@", path);
+    } else {
+        // For non-quarantined files, perform basic signature validation
+        if (policyLevel > GatekeeperPolicyDisabled && !is_validly_signed(msg->event.exec.target, policyLevel)) {
+            LOG_SECURITY("BLOCKING EXEC (Gatekeeper): Non-quarantined file lacks proper signing: %@", path);
+            
+            // Send notification
+            send_security_notification(@"Execution Blocked",
+                                     [NSString stringWithFormat:@"Blocked execution of unsigned app: %@", path],
+                                     true);
+            
+            return ES_AUTH_RESULT_DENY;
+        }
+    }
+    
+    return ES_AUTH_RESULT_ALLOW;
 }
 
-void print_usage(const char *name) {
-    printf("Usage: %s (serial | asynchronous) (verbose)\n", name);
-    printf("Arguments:\n");
-    printf("\tserial\t\tUse serial message handler\n");
-    printf("\tasynchronous\tUse asynchronous message handler\n");
-    printf("\tverbose\t\tTurns on verbose logging\n");
+// Enhanced handler for XProtect-style malware detection
+es_auth_result_t xprotect_auth_handler(const es_message_t *msg) {
+    if (ES_EVENT_TYPE_AUTH_EXEC == msg->event_type) {
+        NSString *path = esstring_to_nsstring(msg->event.exec.target->executable->path);
+        
+        // Analyze file for potential threats
+        ThreatLevel threatLevel = analyze_file_threat_level(msg->event.exec.target->executable->path.data);
+        
+        if (threatLevel == ThreatLevelMalicious) {
+            LOG_SECURITY("BLOCKING EXEC (XProtect): Malicious file detected: %@", path);
+            
+            // Send notification
+            send_security_notification(@"Malware Blocked",
+                                     [NSString stringWithFormat:@"Blocked execution of malicious file: %@", path],
+                                     true);
+            
+            return ES_AUTH_RESULT_DENY;
+        }
+        
+        if (threatLevel == ThreatLevelSuspicious) {
+            LOG_SECURITY("WARNING (XProtect): Suspicious file execution: %@", path);
+            
+            // Record suspicious behavior
+            record_suspicious_behavior(msg->process);
+            
+            // Send notification but allow execution
+            send_security_notification(@"Suspicious File",
+                                     [NSString stringWithFormat:@"Suspicious file executed: %@", path],
+                                     false);
+        }
+    } else if (ES_EVENT_TYPE_AUTH_OPEN == msg->event_type) {
+        NSString *filePath = esstring_to_nsstring(msg->event.open.file->path);
+        
+        // Look for suspicious access patterns to sensitive files
+        if ([filePath containsString:@"/Library/Keychains/"] ||
+            [filePath containsString:@"/Library/Preferences/"] ||
+            [filePath containsString:@"/.ssh/"]) {
+            
+            LOG_SECURITY("WARNING (XProtect): Sensitive file access: %@ by %@",
+                        filePath,
+                        esstring_to_nsstring(msg->process->executable->path));
+            
+            // Record suspicious behavior
+            record_suspicious_behavior(msg->process);
+            
+            // Get number of suspicious behaviors for this process
+            NSString *processPath = esstring_to_nsstring(msg->process->executable->path);
+            NSNumber *count = g_suspicious_behaviors[processPath];
+            
+            // If this process has multiple suspicious behaviors, block sensitive file access
+            if (count && [count intValue] >= SUSPICIOUS_BEHAVIOR_THRESHOLD) {
+                LOG_SECURITY("BLOCKING ACCESS (XProtect): Process has multiple suspicious behaviors: %@", processPath);
+                
+                // Send notification
+                send_security_notification(@"Suspicious Access Blocked",
+                                         [NSString stringWithFormat:@"Blocked suspicious access to %@ by %@",
+                                         filePath, processPath],
+                                         true);
+                
+                return ES_AUTH_RESULT_DENY;
+            }
+        }
+    }
+    
+    return ES_AUTH_RESULT_ALLOW;
 }
 
 // An example handler to make auth (allow or block) decisions.
@@ -755,9 +1156,26 @@ es_auth_result_t auth_event_handler(const es_message_t *msg) {
         return ES_AUTH_RESULT_ALLOW;
     }
     
-    // Ignore events from root processes
-    if(0 == audit_token_to_ruid(msg->process->audit_token)) {
+    // Ignore events from root processes unless in Gatekeeper/XProtect mode
+    if(0 == audit_token_to_ruid(msg->process->audit_token) &&
+       !g_gatekeeper_mode && !g_xprotect_mode) {
         return ES_AUTH_RESULT_ALLOW;
+    }
+    
+    // Run enhanced Gatekeeper checks if enabled
+    if (g_gatekeeper_mode) {
+        es_auth_result_t gatekeeper_result = gatekeeper_auth_handler(msg);
+        if (gatekeeper_result == ES_AUTH_RESULT_DENY) {
+            return ES_AUTH_RESULT_DENY;
+        }
+    }
+    
+    // Run enhanced XProtect checks if enabled
+    if (g_xprotect_mode) {
+        es_auth_result_t xprotect_result = xprotect_auth_handler(msg);
+        if (xprotect_result == ES_AUTH_RESULT_DENY) {
+            return ES_AUTH_RESULT_DENY;
+        }
     }
     
     // Block exec if path of process is in our blocked paths list
@@ -838,6 +1256,72 @@ void respond_to_auth_event(es_client_t *clt, const es_message_t *msg, es_auth_re
     }
 }
 
+#pragma mark - Endpoint Secuirty Demo
+
+// Clean-up before exiting
+void sig_handler(int sig) {
+    LOG_IMPORTANT_INFO("Tidying Up");
+    
+    if(g_client) {
+        es_unsubscribe_all(g_client);
+        es_delete_client(g_client);
+    }
+    
+    LOG_IMPORTANT_INFO("Exiting");
+    exit(EXIT_SUCCESS);
+}
+
+void print_usage(const char *name) {
+    printf("Usage: %s (serial | asynchronous | gatekeeper | xprotect) [verbose]\n", name);
+    printf("Arguments:\n");
+    printf("\tserial\t\tUse serial message handler\n");
+    printf("\tasynchronous\tUse asynchronous message handler\n");
+    printf("\tgatekeeper\tEnable Gatekeeper-like protections\n");
+    printf("\txprotect\tEnable XProtect-like protections\n");
+    printf("\tverbose\t\tTurns on verbose logging\n");
+}
+
+// Initialize security preferences and malware signatures
+void init_security_features(void) {
+    // Initialize suspicious extensions to monitor
+    g_suspicious_extensions = [NSSet setWithObjects:
+                              @"app", @"dylib", @"kext", @"pkg",
+                              @"dmg", @"sh", @"py", @"js", @"command", nil];
+    
+    // Initialize malicious hash database (simplified)
+    // In a real implementation, this would be loaded from an XProtect signature database
+    g_malicious_hashes = [NSMutableSet setWithObjects:
+                         @"e1112134b6dcc8bed54e0e34d8ac272795e73d74fc1bed74f5c716480d1bd60b", // Example hash
+                         @"74865fb5bca5f883169ea308cc441137d36fb1663dd7749db3cc9e0880a8c51a", // Example hash
+                         nil];
+    
+    // Initialize notarization requirements (path -> requirement level)
+    // 0 = disabled, 1 = developer ID signed, 2 = App Store only
+    g_notarization_requirements = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                                 @(GatekeeperPolicyAppStoreOnly), @"/Applications/Banking.app/Contents/MacOS/Banking",
+                                 @(GatekeeperPolicyDeveloperIDSigned), @"/Applications/Developer.app/Contents/MacOS/Developer",
+                                 nil];
+    
+    // Initialize the quarantine status cache
+    g_quarantine_status = [NSMutableDictionary new];
+    
+    // Initialize the suspicious behaviors tracking
+    g_suspicious_behaviors = [NSMutableDictionary new];
+    
+    // Initialize the security preferences
+    g_security_preferences = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                            @(YES), @"BlockSuspiciousProcesses",
+                            @(YES), @"MonitorSensitiveDirectories",
+                            @(YES), @"EnforceCodeSigning",
+                            @(YES), @"CheckQuarantineFlag",
+                            nil];
+    
+    // Initialize notification queue
+    g_notification_queue = dispatch_queue_create("com.security.notifications", DISPATCH_QUEUE_SERIAL);
+    
+    LOG_IMPORTANT_INFO("Security features initialized");
+}
+
 // Example of an event message handler to process event messages serially from Endpoint Security.
 es_handler_block_t serial_message_handler = ^(es_client_t *clt, const es_message_t *msg) {
     // Endpoint Security, by default, calls a event message handler serially for each message.
@@ -874,16 +1358,10 @@ es_handler_block_t asynchronous_message_handler = ^(es_client_t *clt, const es_m
     }
     
     // Demonstrates handling events out of order, by processing 'ES_ACTION_TYPE_AUTH' events on
-    // a separate thread. Sleep for 20s for 'ES_EVENT_TYPE_AUTH_EXEC' events if the result
-    // is an ES_AUTH_RESULT_DENY.
+    // a separate thread.
     if(ES_ACTION_TYPE_AUTH == copied_msg->action_type) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^(void){
             es_auth_result_t result = auth_event_handler(copied_msg);
-            
-            if(ES_AUTH_RESULT_DENY == result &&
-               ES_EVENT_TYPE_AUTH_EXEC == copied_msg->event_type) {
-                [NSThread sleepForTimeInterval:20.0];
-            }
             
             // Auth events require a response sent back before the deadline expires
             respond_to_auth_event(clt, copied_msg, result);
@@ -904,13 +1382,24 @@ es_handler_block_t get_message_handler_from_commandline_args(int argc, const cha
     }
     
     // check if verbose logging argument was given
-    if(argc > 2) {
-        NSString *verbose = [[NSString stringWithUTF8String:argv[2]] lowercaseString];
-        g_verbose_logging = [verbose isEqualToString:@"verbose"];
+    for (int i = 1; i < argc; i++) {
+        NSString *arg = [[NSString stringWithUTF8String:argv[i]] lowercaseString];
+        
+        if ([arg isEqualToString:@"verbose"]) {
+            g_verbose_logging = true;
+        } else if ([arg isEqualToString:@"gatekeeper"]) {
+            g_gatekeeper_mode = true;
+        } else if ([arg isEqualToString:@"xprotect"]) {
+            g_xprotect_mode = true;
+        }
     }
     
     // Try and find an event message handler that matches the first command line argument
     NSString *arg = [[NSString stringWithUTF8String:argv[1]] lowercaseString];
+    
+    if ([arg isEqualToString:@"gatekeeper"] || [arg isEqualToString:@"xprotect"]) {
+        return serial_message_handler;
+    }
     
     NSDictionary *handlers = @{
         @"serial" : serial_message_handler,
@@ -976,13 +1465,38 @@ bool setup_endpoint_security(void) {
         return false;
     }
     
-    // Subscribe to the events we're interested in
-    es_event_type_t events[] = {
-        ES_EVENT_TYPE_AUTH_EXEC
-      , ES_EVENT_TYPE_AUTH_OPEN
-      , ES_EVENT_TYPE_NOTIFY_FORK
-    };
+    // Build a list of events to subscribe to
+    NSMutableArray *eventsList = [NSMutableArray arrayWithObjects:
+                               @(ES_EVENT_TYPE_AUTH_EXEC),
+                               @(ES_EVENT_TYPE_AUTH_OPEN),
+                               @(ES_EVENT_TYPE_NOTIFY_FORK),
+                               nil];
     
+    // Add XProtect and Gatekeeper specific events if enabled
+    if (g_xprotect_mode) {
+        // XProtect needs to monitor write and create events
+        [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_CREATE)];
+        [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_WRITE)];
+        
+        if (@available(macOS 13.0, *)) {
+            [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED)];
+            [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED)];
+        }
+    }
+    
+    if (g_gatekeeper_mode) {
+        if (@available(macOS 15.0, *)) {
+            [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE)];
+        }
+    }
+    
+    // Convert NSArray to C array
+    es_event_type_t events[eventsList.count];
+    for (NSUInteger i = 0; i < eventsList.count; i++) {
+        events[i] = (es_event_type_t)[[eventsList objectAtIndex:i] intValue];
+    }
+    
+    // Subscribe to the events we're interested in
     es_return_t subscribed = es_subscribe(g_client, events, sizeof events / sizeof *events);
     
     if(ES_RETURN_ERROR == subscribed) {
@@ -1006,8 +1520,14 @@ int main(int argc, const char * argv[]) {
             return 1;
         }
         
+        // Initialize date formatter and other tracking collections
         init_date_formater();
         g_seq_nums = [NSMutableDictionary new];
+        
+        // Initialize security features if we're in security mode
+        if (g_gatekeeper_mode || g_xprotect_mode) {
+            init_security_features();
+        }
         
         // List of paths to be blocked.
         // For this demo we will block the top binary and Calculator app bundle.
@@ -1020,25 +1540,25 @@ int main(int argc, const char * argv[]) {
             return 1;
         }
         
-        // Note: Endpoint Security have a set of es_mute* functions to suppress events for a process.
-        // Uncomment the 'mute_path' line below to stop receiving events from the 'vim' binary.
-        // This program will then stop receiving 'ES_EVENT_TYPE_AUTH_OPEN' events for vim and will no
-        // longer be able to block vim from opening plain text files.
-        // mute_path("/usr/bin/vim");
-        
         if(@available(macOS 12.0, *)) {
             // Note: Endpoint Security for performance reasons will automatically mute a set of paths
             // on creation of new clients ('es_new_client').
             // macOS Monterey 12 now has the 'es_muted_paths_events' function, which can be used to
-            // inspect the muted paths. It is possible to unmute these paths (e.g. by using
-            // 'es_release_muted_paths'), but Apple advises against this.
+            // inspect the muted paths.
             log_muted_paths_events();
         } else {
             // ES on macOS Monterey 12 implicitly mutes events from cfprefsd. We need to explicitly do
-            // this on older versions of macOS to prevent deadlocks in this program. This is because
-            // UTType and NSDate objects, used in parts of this program, may implicitly
-            // make NSUserDefaults calls which will generate ES events for cfprefsd.
+            // this on older versions of macOS to prevent deadlocks in this program.
             mute_path("/usr/sbin/cfprefsd");
+        }
+        
+        // Log operating mode
+        if (g_gatekeeper_mode) {
+            LOG_IMPORTANT_INFO("Running in Gatekeeper emulation mode");
+        }
+        
+        if (g_xprotect_mode) {
+            LOG_IMPORTANT_INFO("Running in XProtect emulation mode");
         }
         
         // Start handling events from Endpoint Security
