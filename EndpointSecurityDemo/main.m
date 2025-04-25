@@ -2,33 +2,33 @@
 //  main.m
 //  EndpointSecurityDemo
 //
-//  Created by Omar Ikram on 17/06/2019 - macOS Catalina 10.15 Beta 1 (19A471t)
-//  Updated by Omar Ikram on 15/08/2019 - macOS Catalina 10.15 Beta 5 (19A526h)
-//  Updated by Omar Ikram on 01/12/2019 - macOS Catalina 10.15 (19A583)
-//  Updated by Omar Ikram on 31/01/2021 - macOS Big Sur 11.1 (20C69)
-//  Updated by Omar Ikram on 07/05/2021 - macOS Big Sur 11.3.1 (20E241)
-//  Updated by Omar Ikram on 04/07/2021 - macOS Monterey 12 Beta 2 (21A5268h)
-//  Updated by Omar Ikram on 08/01/2022 - macOS Monterey 12.1 (21C52)
-//  Updated by Omar Ikram on 15/02/2022 - macOS Monterey 12.2.1 (21D62)
-//  Updated by Omar Ikram on 04/01/2025 - macOS Sequoia 15.2 (24C101)
+//  Created by Anubhav Gain on 17/06/2019 - macOS Catalina 10.15 Beta 1 (19A471t)
+//  Updated by Anubhav Gain on 15/08/2019 - macOS Catalina 10.15 Beta 5 (19A526h)
+//  Updated by Anubhav Gain on 01/12/2019 - macOS Catalina 10.15 (19A583)
+//  Updated by Anubhav Gain on 31/01/2021 - macOS Big Sur 11.1 (20C69)
+//  Updated by Anubhav Gain on 07/05/2021 - macOS Big Sur 11.3.1 (20E241)
+//  Updated by Anubhav Gain on 04/07/2021 - macOS Monterey 12 Beta 2 (21A5268h)
+//  Updated by Anubhav Gain on 08/01/2022 - macOS Monterey 12.1 (21C52)
+//  Updated by Anubhav Gain on 15/02/2022 - macOS Monterey 12.2.1 (21D62)
+//  Updated by Anubhav Gain on 04/01/2025 - macOS Sequoia 15.2 (24C101)
 //  Enhanced with Gatekeeper and XProtect features
 //
 
 /*
- 
+
  A demo of using Apple's EndpointSecurity framework with Gatekeeper and XProtect enhancements
  - tested on macOS Sequoia 15.2 (24C101).
- 
+
  Minimum supported version: macOS Catalina 10.15
- 
+
  This demo is an update of previous demos, which has been updated to support the latest API changes
  Apple has made for macOS Sequoia 15 plus additional security features that emulate and extend
  Gatekeeper and XProtect functionality.
- 
+
  Disclaimer:
  This code is provided as is and is only intended to be used for illustration purposes. This code is
  not production-ready and is not meant to be used in a production environment. Use it at your own risk!
- 
+
  Setup:
  1. Build with Xcode 16 (tested with Version 16.2 (16C5032a)), having the macOS deployment target set
     to 10.15 (or later) and the Hardened Runtime capability enabled.
@@ -40,7 +40,7 @@
       , so it needs to be optinally linked - e.g. with the '-weak_framework' linker option)
 
  3. Codesign with entitlement 'com.apple.developer.endpoint-security.client'.
- 
+
  Runtime:
  1. Test environment should be a macOS 10.15+ machine.
  2. Run the demo binary in a terminal as root (e.g. with sudo).
@@ -54,7 +54,7 @@
     v)   Running with the 'xprotect' argument will run the demo with XProtect
          simulation and monitoring features.
     vi)  Adding the 'verbose' argument at the end will turn on verbose logging.
- 
+
  */
 
 #import <Foundation/Foundation.h>
@@ -183,9 +183,9 @@ uint64_t MachTimeToNanoseconds(uint64_t machTime) {
     static mach_timebase_info_data_t sTimebase;
     if(sTimebase.denom == 0)
         (void)mach_timebase_info(&sTimebase);
-        
+
     nanoseconds = ((machTime * sTimebase.numer) / sTimebase.denom);
-        
+
     return nanoseconds;
 }
 
@@ -218,14 +218,14 @@ const CSFlag g_csFlags[] = {
 
 NSString* codesigning_flags_str(const uint32_t codesigning_flags) {
     NSMutableArray *match_flags = [NSMutableArray new];
-    
+
     // Test which code signing flags have been set and add the matched ones to an array
     for(uint32_t i = 0; i < (sizeof g_csFlags / sizeof *g_csFlags); i++) {
         if((codesigning_flags & g_csFlags[i].value) == g_csFlags[i].value) {
             [match_flags addObject:g_csFlags[i].name];
         }
     }
-    
+
     return [match_flags componentsJoinedByString:@","];
 }
 
@@ -234,24 +234,24 @@ bool is_validly_signed(const es_process_t* proc, GatekeeperPolicyLevel policy_le
     if (policy_level == GatekeeperPolicyDisabled) {
         return true;
     }
-    
+
     // Check if binary is a platform binary (Apple-signed)
     bool is_apple_binary = (proc->codesigning_flags & CS_PLATFORM_BINARY) == CS_PLATFORM_BINARY;
-    
+
     // Check if binary has a valid signature
     bool is_validly_signed = (proc->codesigning_flags & CS_VALID) == CS_VALID;
-    
+
     // Check if the signature was validated (not ad-hoc)
     bool not_adhoc = (proc->codesigning_flags & CS_ADHOC) != CS_ADHOC;
-    
+
     if (is_apple_binary) {
         // Always allow Apple binaries
         return true;
     }
-    
+
     // Get the team ID (used for Developer ID validation)
     NSString *team_id = esstring_to_nsstring(proc->team_id);
-    
+
     // For App Store only policy, check for specific flags
     if (policy_level == GatekeeperPolicyAppStoreOnly) {
         // App Store apps have specific validation flags
@@ -259,12 +259,12 @@ bool is_validly_signed(const es_process_t* proc, GatekeeperPolicyLevel policy_le
         return is_validly_signed && not_adhoc &&
                (proc->codesigning_flags & CS_RESTRICT) == CS_RESTRICT;
     }
-    
+
     // For Developer ID policy, check valid signature and not adhoc
     if (policy_level == GatekeeperPolicyDeveloperIDSigned) {
         return is_validly_signed && not_adhoc && team_id.length > 0;
     }
-    
+
     return false;
 }
 
@@ -284,35 +284,35 @@ NSString* calculate_file_hash(const char* path) {
     if (!data) {
         return nil;
     }
-    
+
     unsigned char hash[CC_SHA256_DIGEST_LENGTH];
     CC_SHA256(data.bytes, (CC_LONG)data.length, hash);
-    
+
     NSMutableString *hashString = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
     for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
         [hashString appendFormat:@"%02x", hash[i]];
     }
-    
+
     return [hashString copy];
 }
 
 // Check if file is quarantined
 bool is_file_quarantined(const char* path) {
     NSString *nsPath = @(path);
-    
+
     // Check cache first
     if (g_quarantine_status[nsPath] != nil) {
         return [g_quarantine_status[nsPath] boolValue];
     }
-    
+
     // Read extended attribute
     const char *name = QUARANTINE_ATTR_NAME;
     ssize_t size = getxattr(path, name, NULL, 0, 0, 0);
     bool isQuarantined = (size > 0);
-    
+
     // Cache the result
     g_quarantine_status[nsPath] = @(isQuarantined);
-    
+
     return isQuarantined;
 }
 
@@ -320,31 +320,31 @@ bool is_file_quarantined(const char* path) {
 NSDictionary* get_quarantine_data(const char* path) {
     const char *name = QUARANTINE_ATTR_NAME;
     ssize_t size = getxattr(path, name, NULL, 0, 0, 0);
-    
+
     if (size <= 0) {
         return nil;
     }
-    
+
     char *buffer = malloc(size);
     if (!buffer) {
         return nil;
     }
-    
+
     getxattr(path, name, buffer, size, 0, 0);
     NSString *qdata = [[NSString alloc] initWithBytes:buffer length:size encoding:NSUTF8StringEncoding];
     free(buffer);
-    
+
     if (!qdata) {
         return nil;
     }
-    
+
     // Parse quarantine data - format is typically:
     // 0083;5f5e196e;Safari;6489CA8E-FC5E-4C0C-9F22-609C7C7D9F6F
     NSArray *components = [qdata componentsSeparatedByString:@";"];
     if (components.count < 4) {
         return nil;
     }
-    
+
     return @{
         @"flag": components[0],
         @"timestamp": components[1],
@@ -357,15 +357,15 @@ NSDictionary* get_quarantine_data(const char* path) {
 void record_suspicious_behavior(const es_process_t* proc) {
     NSString *path = esstring_to_nsstring(proc->executable->path);
     NSNumber *count = g_suspicious_behaviors[path];
-    
+
     if (count == nil) {
         count = @(1);
     } else {
         count = @([count intValue] + 1);
     }
-    
+
     g_suspicious_behaviors[path] = count;
-    
+
     if ([count intValue] >= SUSPICIOUS_BEHAVIOR_THRESHOLD) {
         LOG_IMPORTANT_INFO("Process has triggered multiple suspicious behavior alerts: %@", path);
     }
@@ -382,12 +382,12 @@ bool can_execute(const es_file_t* file) {
     mode_t mode = file->stat.st_mode;
     uid_t uid = getuid();
     gid_t gid = getgid();
-    
+
     if (uid == 0) {
         // Root can execute anything
         return true;
     }
-    
+
     if (uid == file->stat.st_uid) {
         // User is owner
         return (mode & S_IXUSR) != 0;
@@ -404,19 +404,19 @@ bool can_execute(const es_file_t* file) {
 ThreatLevel analyze_file_threat_level(const char* path) {
     // In a real implementation, this would use XProtect's signatures and analysis
     // For this demo, we'll use a simple hash lookup and extension check
-    
+
     // Check file hash against known malicious hashes
     NSString *fileHash = calculate_file_hash(path);
     if (fileHash && [g_malicious_hashes containsObject:fileHash]) {
         return ThreatLevelMalicious;
     }
-    
+
     // Check file extension
     NSString *filePath = @(path);
     if (has_suspicious_extension(filePath)) {
         return ThreatLevelSuspicious;
     }
-    
+
     return ThreatLevelNone;
 }
 
@@ -427,9 +427,9 @@ void send_security_notification(NSString *title, NSString *message, bool is_crit
         notification.title = title;
         notification.informativeText = message;
         notification.soundName = is_critical ? NSUserNotificationDefaultSoundName : nil;
-        
+
         [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
-        
+
         // Log the notification as well
         LOG_IMPORTANT_INFO("SECURITY ALERT: %@ - %@", title, message);
     });
@@ -467,7 +467,7 @@ const NSString* event_type_str(const es_event_type_t event_type) {
         @"ES_EVENT_TYPE_NOTIFY_LOOKUP", @"ES_EVENT_TYPE_AUTH_CREATE", @"ES_EVENT_TYPE_AUTH_SETATTRLIST",
         @"ES_EVENT_TYPE_AUTH_SETEXTATTR", @"ES_EVENT_TYPE_AUTH_SETFLAGS", @"ES_EVENT_TYPE_AUTH_SETMODE",
         @"ES_EVENT_TYPE_AUTH_SETOWNER",
-        
+
         // The following events are available beginning in macOS 10.15.1
         @"ES_EVENT_TYPE_AUTH_CHDIR", @"ES_EVENT_TYPE_NOTIFY_CHDIR", @"ES_EVENT_TYPE_AUTH_GETATTRLIST",
         @"ES_EVENT_TYPE_NOTIFY_GETATTRLIST", @"ES_EVENT_TYPE_NOTIFY_STAT", @"ES_EVENT_TYPE_NOTIFY_ACCESS",
@@ -480,18 +480,18 @@ const NSString* event_type_str(const es_event_type_t event_type) {
         @"ES_EVENT_TYPE_AUTH_SETTIME", @"ES_EVENT_TYPE_NOTIFY_SETTIME", @"ES_EVENT_TYPE_NOTIFY_UIPC_BIND",
         @"ES_EVENT_TYPE_AUTH_UIPC_BIND", @"ES_EVENT_TYPE_NOTIFY_UIPC_CONNECT", @"ES_EVENT_TYPE_AUTH_UIPC_CONNECT",
         @"ES_EVENT_TYPE_AUTH_EXCHANGEDATA", @"ES_EVENT_TYPE_AUTH_SETACL", @"ES_EVENT_TYPE_NOTIFY_SETACL",
-        
+
         // The following events are available beginning in macOS 10.15.4
         @"ES_EVENT_TYPE_NOTIFY_PTY_GRANT", @"ES_EVENT_TYPE_NOTIFY_PTY_CLOSE", @"ES_EVENT_TYPE_AUTH_PROC_CHECK",
         @"ES_EVENT_TYPE_NOTIFY_PROC_CHECK", @"ES_EVENT_TYPE_AUTH_GET_TASK",
-        
+
         // The following events are available beginning in macOS 11.0
         @"ES_EVENT_TYPE_AUTH_SEARCHFS", @"ES_EVENT_TYPE_NOTIFY_SEARCHFS", @"ES_EVENT_TYPE_AUTH_FCNTL",
         @"ES_EVENT_TYPE_AUTH_IOKIT_OPEN", @"ES_EVENT_TYPE_AUTH_PROC_SUSPEND_RESUME",
         @"ES_EVENT_TYPE_NOTIFY_PROC_SUSPEND_RESUME", @"ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED",
         @"ES_EVENT_TYPE_NOTIFY_GET_TASK_NAME", @"ES_EVENT_TYPE_NOTIFY_TRACE",
         @"ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE", @"ES_EVENT_TYPE_AUTH_REMOUNT", @"ES_EVENT_TYPE_NOTIFY_REMOUNT",
-        
+
         // The following events are available beginning in macOS 11.3
         @"ES_EVENT_TYPE_AUTH_GET_TASK_READ", @"ES_EVENT_TYPE_NOTIFY_GET_TASK_READ",
         @"ES_EVENT_TYPE_NOTIFY_GET_TASK_INSPECT",
@@ -525,21 +525,21 @@ const NSString* event_type_str(const es_event_type_t event_type) {
         // The following events are available beginning in macOS 15.0
         @"ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE"
     };
-    
+
     if(event_type >= ES_EVENT_TYPE_LAST) {
         return [NSString stringWithFormat:@"Unknown/Unsupported event type: %d", event_type];
     }
-    
+
     return names[event_type];
 }
 
 NSString* events_str(size_t count, const es_event_type_t* events) {
     NSMutableArray *arr = [NSMutableArray new];
-    
+
     for(size_t i = 0; i < count; i++) {
         [arr addObject:event_type_str(events[i])];
     }
-    
+
     return [arr componentsJoinedByString:@", "];
 }
 
@@ -601,7 +601,7 @@ bool is_system_file(const NSString* path) {
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -644,22 +644,22 @@ API_AVAILABLE(macos(12.0))
 bool log_muted_paths_events(void) {
     es_muted_paths_t *muted_paths = NULL;
     es_return_t result = es_muted_paths_events(g_client, &muted_paths);
-    
+
     if(ES_RETURN_SUCCESS != result) {
         LOG_ERROR("es_muted_paths_events: ES_RETURN_ERROR");
         return false;
     }
-    
+
     if(NULL == muted_paths) {
         // There are no muted paths
         return true;
     }
-    
+
     LOG_IMPORTANT_INFO("Muted Paths");
     for(size_t i = 0; i < muted_paths->count; i++) {
         es_muted_path_t muted_path = muted_paths->paths[i];
         LOG_INFO("muted_path[%ld]: %@", i, esstring_to_nsstring(muted_path.path));
-        
+
         if(g_verbose_logging) {
             LOG_INDENT_INC();
             LOG_INFO("type: %s", (muted_path.type == ES_MUTE_PATH_TYPE_PREFIX) ? "Prefix" : "Literal");
@@ -668,7 +668,7 @@ bool log_muted_paths_events(void) {
             LOG_INDENT_DEC();
         }
     }
-    
+
     es_release_muted_paths(muted_paths);
     return true;
 }
@@ -678,14 +678,14 @@ bool log_subscribed_events(void) {
     size_t count = 0;
     es_event_type_t *events = NULL;
     es_return_t result = es_subscriptions(g_client, &count, &events);
-    
+
     if(ES_RETURN_SUCCESS != result) {
         LOG_ERROR("es_subscriptions: ES_RETURN_ERROR");
         return false;
     }
-    
+
     LOG_IMPORTANT_INFO("Subscribed Events: %@", events_str(count, events));
-    
+
     free(events);
     return true;
 }
@@ -695,25 +695,25 @@ void log_file(const NSString* header, const es_file_t* file) {
         LOG_INFO("%@: (null)", header);
         return;
     }
-    
+
     LOG_INFO("%@:", header);
     LOG_INDENT_INC();
     LOG_INFO("path: %@", esstring_to_nsstring(file->path));
     LOG_INFO("path_truncated: %s", BOOL_VALUE(file->path_truncated));
-    
+
     LOG_INFO("stat.st_dev: %d", file->stat.st_dev);
     LOG_INFO("stat.st_ino: %llu", file->stat.st_ino);
     LOG_INFO("stat.st_mode: %u (%s)", file->stat.st_mode, filetype_str(file->stat.st_mode));
     LOG_INFO("stat.st_nlink: %u", file->stat.st_nlink);
-    
+
     LOG_INFO("stat.st_uid: %u", file->stat.st_uid);
     LOG_INFO("stat.st_gid: %u", file->stat.st_gid);
-    
+
     LOG_INFO("stat.st_atime: %@", formatted_date_str(file->stat.st_atime));
     LOG_INFO("stat.st_mtime: %@", formatted_date_str(file->stat.st_mtime));
     LOG_INFO("stat.st_ctime: %@", formatted_date_str(file->stat.st_ctime));
     LOG_INFO("stat.st_birthtime: %@", formatted_date_str(file->stat.st_birthtime));
-    
+
     LOG_INFO("stat.st_size: %lld", file->stat.st_size);
     LOG_INFO("stat.st_blocks: %lld", file->stat.st_blocks);
     LOG_INFO("stat.st_blksize: %d", file->stat.st_blksize);
@@ -727,45 +727,45 @@ void log_proc(uint32_t msg_version, const NSString* header, const es_process_t* 
         LOG_INFO("%@: (null)", header);
         return;
     }
-    
+
     LOG_INFO("%@:", header);
     LOG_INDENT_INC();
     log_audit_token(@"proc.audit_token", proc->audit_token);
     LOG_INFO("proc.ppid: %d", proc->ppid);
     LOG_INFO("proc.original_ppid: %d", proc->original_ppid);
-    
+
     if(msg_version >= 4) {
         log_audit_token(@"proc.responsible_audit_token", proc->responsible_audit_token);
         log_audit_token(@"proc.parent_audit_token", proc->parent_audit_token);
     }
-    
+
     LOG_INFO("proc.group_id: %d", proc->group_id);
     LOG_INFO("proc.session_id: %d", proc->session_id);
     LOG_INFO("proc.is_platform_binary: %s", BOOL_VALUE(proc->is_platform_binary));
     LOG_INFO("proc.is_es_client: %s", BOOL_VALUE(proc->is_es_client));
     LOG_INFO("proc.signing_id: %@", esstring_to_nsstring(proc->signing_id));
     LOG_INFO("proc.team_id: %@", esstring_to_nsstring(proc->team_id));
-    
+
     if(msg_version >= 3) {
         LOG_INFO("proc.start_time: %@", formatted_date_str(proc->start_time.tv_sec));
     }
-    
+
     LOG_INFO("proc.codesigning_flags: %x (%@)",
              proc->codesigning_flags, codesigning_flags_str(proc->codesigning_flags));
-    
+
     // proc.cdhash
     NSMutableString *hash = [NSMutableString string];
     for(uint32_t i = 0; i < CS_CDHASH_LEN; i++) {
         [hash appendFormat:@"%02x", proc->cdhash[i]];
     }
     LOG_INFO("proc.cdhash: %@", hash);
-    
+
     log_file(@"proc.executable", proc->executable);
-    
+
     if(msg_version >= 2 && proc->tty) {
         log_file(@"proc.tty", proc->tty);
     }
-    
+
     LOG_INDENT_DEC();
 }
 
@@ -773,13 +773,13 @@ void log_command_line_arguments(const es_event_exec_t* exec) {
     uint32_t arg_count = es_exec_arg_count(exec);
     LOG_INFO("event.exec.arg_count: %u", arg_count);
     LOG_INDENT_INC();
-    
+
     // Extract each argument and log it out
     for(uint32_t i = 0; i < arg_count; i++) {
         es_string_token_t arg = es_exec_arg(exec, i);
         LOG_INFO("arg[%d]: %@", i, esstring_to_nsstring(arg));
     }
-    
+
     LOG_INDENT_DEC();
 }
 
@@ -787,13 +787,13 @@ void log_environment_variable(const es_event_exec_t* exec) {
     uint32_t env_count = es_exec_env_count(exec);
     LOG_INFO("event.exec.env_count: %u", env_count);
     LOG_INDENT_INC();
-    
+
     // Extract each env and log it out
     for(uint32_t i = 0; i < env_count; i++) {
         es_string_token_t arg = es_exec_env(exec, i);
         LOG_INFO("env[%d]: %@", i, esstring_to_nsstring(arg));
     }
-    
+
     LOG_INDENT_DEC();
 }
 
@@ -802,20 +802,20 @@ void log_file_descriptors(const es_event_exec_t* exec) {
         uint32_t fd_count = es_exec_fd_count(exec);
         LOG_INFO("event.exec.fd_count: %u", fd_count);
         LOG_INDENT_INC();
-        
+
         // Extract each fd and log it out
         for(uint32_t i = 0; i < fd_count; i++) {
             // Pointer must not outlive event
             const es_fd_t *arg = es_exec_fd(exec, i);
-            
+
             LOG_INFO("fd[%d].fd: %d", i, arg->fd);
             LOG_INFO("fd[%d].fdtype: %@", i, fdtype_str(arg->fdtype));
-            
+
             if(PROX_FDTYPE_PIPE == arg->fdtype) {
                 LOG_INFO("fd[%d].fd: %llu", i, arg->pipe.pipe_id);
             }
         }
-        
+
         LOG_INDENT_DEC();
     }
 }
@@ -825,15 +825,15 @@ void log_event_exec(uint32_t msg_version, const es_event_exec_t* exec) {
     log_command_line_arguments(exec);
     log_environment_variable(exec);
     log_file_descriptors(exec);
-    
+
     if(msg_version >= 2 && exec->script) {
         log_file(@"event.exec.script", exec->script);
     }
-    
+
     if(msg_version >= 3) {
         log_file(@"event.exec.cwd", exec->cwd);
     }
-    
+
     if(msg_version >= 4) {
         LOG_INFO("event.exec.last_fd: %d", exec->last_fd);
     }
@@ -841,15 +841,15 @@ void log_event_exec(uint32_t msg_version, const es_event_exec_t* exec) {
 
 void log_event_open(const es_event_open_t* open) {
     NSMutableArray *match_flags = [NSMutableArray new];
-    
+
     if((open->fflag & FREAD) == FREAD) {
         [match_flags addObject:@"FREAD"];
     }
-    
+
     if((open->fflag & FWRITE) == FWRITE) {
         [match_flags addObject:@"FWRITE"];
     }
-    
+
     LOG_INFO("event.open.fflag: %d (%@)",
              open->fflag, [match_flags componentsJoinedByString:@", "]);
     log_file(@"event.open.file", open->file);
@@ -859,73 +859,73 @@ void log_event_open(const es_event_open_t* open) {
 void log_event_message(const es_message_t *msg) {
     LOG_INFO("--- EVENT MESSAGE ----");
     LOG_INFO("event_type: %@ (%d)", event_type_str(msg->event_type), msg->event_type);
-    
+
     // Note: Apple have designed the Endpoint Security structures to support additional fields
     // in the future. Always check the version of the message before using a field, in the message
     // or sub-structure, which has been added to a later version of Endpoint Security.
     // Only new fields are added. Existing fields should be available in future revisions.
     uint32_t version = msg->version;
     LOG_INFO("version: %u", version);
-    
+
     LOG_INFO("time: %@", formatted_date_str(msg->time.tv_sec));
     LOG_INFO("mach_time: %lld", msg->mach_time);
-   
+
     // Note: It's very important that an auth event is processed within the deadline:
     // https://developer.apple.com/documentation/endpointsecurity/es_message_t/3334985-deadline
     LOG_INFO("deadline: %llu", msg->deadline);
-    
+
     uint64_t deadlineInterval = msg->deadline;
-    
+
     if(deadlineInterval > 0) {
         deadlineInterval -= msg->mach_time;
     }
-    
+
     LOG_INFO("deadline interval: %llu (%llu seconds)",
              deadlineInterval, MachTimeToSeconds(deadlineInterval));
-    
+
     // Note: You can use the seq_num field to detect if the kernel had to drop any event messages,
     // for an event type, to the client.
     if(version >= 2) {
         LOG_INFO("seq_num: %lld", msg->seq_num);
     }
-    
+
     // Note: You can use the global_seq_num field to detect if the kernel had to drop any event
     // messages to the client.
     if(version >= 4) {
         LOG_INFO("global_seq_num: %lld", msg->global_seq_num);
     }
-    
+
     if(version >= 4 && msg->thread) {
         LOG_INFO("thread_id: %lld", msg->thread->thread_id);
     }
-    
+
     LOG_INFO("action_type: %s", (msg->action_type == ES_ACTION_TYPE_AUTH) ? "Auth" : "Notify");
     log_proc(version, @"process", msg->process);
-    
+
     // Event specific logging
     switch(msg->event_type) {
         case ES_EVENT_TYPE_AUTH_EXEC: {
             log_event_exec(version, &msg->event.exec);
         }
             break;
-            
+
         case ES_EVENT_TYPE_AUTH_OPEN: {
             log_event_open(&msg->event.open);
         }
             break;
-            
+
         case ES_EVENT_TYPE_NOTIFY_FORK: {
             log_proc(version, @"event.fork.child", msg->event.fork.child);
         }
             break;
-            
+
         case ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE: {
             // Available in macOS 15+ - monitor user overrides of Gatekeeper decisions
             if (@available(macOS 15.0, *)) {
                 // The exact structure format depends on the Apple SDK
                 // This is a simplified version
                 LOG_SECURITY("Gatekeeper override detected");
-                
+
                 // Log when a user overrides Gatekeeper to allow an unsigned app
                 send_security_notification(@"Gatekeeper Override",
                                          @"User overrode Gatekeeper protection",
@@ -933,14 +933,14 @@ void log_event_message(const es_message_t *msg) {
             }
         }
             break;
-            
+
         case ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED: {
             // Available in macOS 13+ - monitor XProtect malware detections
             if (@available(macOS 13.0, *)) {
                 // The exact structure format depends on the Apple SDK
                 // This is a simplified version
                 LOG_SECURITY("XProtect detected malware");
-                
+
                 // Alert on XProtect detections
                 send_security_notification(@"Malware Detected",
                                          @"XProtect detected malware",
@@ -948,14 +948,14 @@ void log_event_message(const es_message_t *msg) {
             }
         }
             break;
-            
+
         case ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED: {
             // Available in macOS 13+ - monitor XProtect malware remediations
             if (@available(macOS 13.0, *)) {
                 // The exact structure format depends on the Apple SDK
                 // This is a simplified version
                 LOG_SECURITY("XProtect remediated malware");
-                
+
                 // Alert on XProtect remediations
                 send_security_notification(@"Malware Remediated",
                                          @"XProtect remediated malware",
@@ -963,13 +963,13 @@ void log_event_message(const es_message_t *msg) {
             }
         }
             break;
-            
+
         case ES_EVENT_TYPE_LAST:
         default: {
             // Not interested
         }
     }
-    
+
     LOG_INFO("");
 }
 
@@ -977,32 +977,32 @@ void log_event_message(const es_message_t *msg) {
 // using the using the seq_num or global_seq_num fields in an event message
 void detect_and_log_dropped_events(const es_message_t *msg) {
     uint32_t version = msg->version;
-    
+
     // Note: You can use the seq_num field to detect if the kernel had to
     // drop any event messages, for an event type, to the client.
     if(version >= 2) {
         uint64_t seq_num = msg->seq_num;
-        
+
         const NSString *type = event_type_str(msg->event_type);
         NSNumber *last_seq_num = [g_seq_nums objectForKey:type];
-        
+
         if(last_seq_num != nil) {
             uint64_t expected_seq_num = [last_seq_num unsignedLongLongValue] + 1;
-            
+
             if(seq_num > expected_seq_num) {
                 LOG_ERROR("EVENTS DROPPED! seq_num is ahead by: %llu",
                           (seq_num - expected_seq_num));
             }
         }
-        
+
         [g_seq_nums setObject:[NSNumber numberWithUnsignedLong:seq_num] forKey:type];
     }
-    
+
     // Note: You can use the global_seq_num field to detect if the kernel had to
     // drop any event messages to the client.
     if(version >= 4) {
         uint64_t global_seq_num = msg->global_seq_num;
-        
+
         if(global_seq_num > ++g_global_seq_num) {
             LOG_ERROR("EVENTS DROPPED! global_seq_num is ahead by: %llu",
                       (global_seq_num - g_global_seq_num));
@@ -1019,64 +1019,64 @@ es_auth_result_t gatekeeper_auth_handler(const es_message_t *msg) {
     if (ES_EVENT_TYPE_AUTH_EXEC != msg->event_type) {
         return ES_AUTH_RESULT_ALLOW;
     }
-    
+
     // Get the path of the file being executed
     NSString *path = esstring_to_nsstring(msg->event.exec.target->executable->path);
-    
+
     // Check if we have a specific notarization requirement for this path
     NSNumber *requirementLevel = [g_notarization_requirements objectForKey:path];
-    
+
     // If no specific requirement, use default (developer ID signed)
     GatekeeperPolicyLevel policyLevel = requirementLevel ?
                                       [requirementLevel intValue] :
                                       GatekeeperPolicyDeveloperIDSigned;
-    
+
     // Skip checking system binaries
     if (msg->event.exec.target->is_platform_binary) {
         return ES_AUTH_RESULT_ALLOW;
     }
-    
+
     // Check for quarantine flag
     bool quarantined = is_file_quarantined(msg->event.exec.target->executable->path.data);
-    
+
     // If file is quarantined, apply stricter checks
     if (quarantined) {
         LOG_SECURITY("Quarantined file execution attempt: %@", path);
-        
+
         // Check if validly signed according to policy
         bool validly_signed = is_validly_signed(msg->event.exec.target, policyLevel);
-        
+
         // Check if notarized (for apps requiring it)
         bool notarized = is_notarized(msg->event.exec.target);
-        
+
         // For quarantined files, we want both valid signature and notarization
         if (!validly_signed || (policyLevel >= GatekeeperPolicyDeveloperIDSigned && !notarized)) {
             LOG_SECURITY("BLOCKING EXEC (Gatekeeper): Quarantined file lacks proper signing/notarization: %@", path);
-            
+
             // Send notification
             send_security_notification(@"Execution Blocked",
                                      [NSString stringWithFormat:@"Blocked execution of unsigned/unnotarized app: %@", path],
                                      true);
-            
+
             return ES_AUTH_RESULT_DENY;
         }
-        
+
         // Log successful validation
         LOG_SECURITY("Allowed quarantined file execution (validated): %@", path);
     } else {
         // For non-quarantined files, perform basic signature validation
         if (policyLevel > GatekeeperPolicyDisabled && !is_validly_signed(msg->event.exec.target, policyLevel)) {
             LOG_SECURITY("BLOCKING EXEC (Gatekeeper): Non-quarantined file lacks proper signing: %@", path);
-            
+
             // Send notification
             send_security_notification(@"Execution Blocked",
                                      [NSString stringWithFormat:@"Blocked execution of unsigned app: %@", path],
                                      true);
-            
+
             return ES_AUTH_RESULT_DENY;
         }
     }
-    
+
     return ES_AUTH_RESULT_ALLOW;
 }
 
@@ -1084,27 +1084,27 @@ es_auth_result_t gatekeeper_auth_handler(const es_message_t *msg) {
 es_auth_result_t xprotect_auth_handler(const es_message_t *msg) {
     if (ES_EVENT_TYPE_AUTH_EXEC == msg->event_type) {
         NSString *path = esstring_to_nsstring(msg->event.exec.target->executable->path);
-        
+
         // Analyze file for potential threats
         ThreatLevel threatLevel = analyze_file_threat_level(msg->event.exec.target->executable->path.data);
-        
+
         if (threatLevel == ThreatLevelMalicious) {
             LOG_SECURITY("BLOCKING EXEC (XProtect): Malicious file detected: %@", path);
-            
+
             // Send notification
             send_security_notification(@"Malware Blocked",
                                      [NSString stringWithFormat:@"Blocked execution of malicious file: %@", path],
                                      true);
-            
+
             return ES_AUTH_RESULT_DENY;
         }
-        
+
         if (threatLevel == ThreatLevelSuspicious) {
             LOG_SECURITY("WARNING (XProtect): Suspicious file execution: %@", path);
-            
+
             // Record suspicious behavior
             record_suspicious_behavior(msg->process);
-            
+
             // Send notification but allow execution
             send_security_notification(@"Suspicious File",
                                      [NSString stringWithFormat:@"Suspicious file executed: %@", path],
@@ -1112,38 +1112,38 @@ es_auth_result_t xprotect_auth_handler(const es_message_t *msg) {
         }
     } else if (ES_EVENT_TYPE_AUTH_OPEN == msg->event_type) {
         NSString *filePath = esstring_to_nsstring(msg->event.open.file->path);
-        
+
         // Look for suspicious access patterns to sensitive files
         if ([filePath containsString:@"/Library/Keychains/"] ||
             [filePath containsString:@"/Library/Preferences/"] ||
             [filePath containsString:@"/.ssh/"]) {
-            
+
             LOG_SECURITY("WARNING (XProtect): Sensitive file access: %@ by %@",
                         filePath,
                         esstring_to_nsstring(msg->process->executable->path));
-            
+
             // Record suspicious behavior
             record_suspicious_behavior(msg->process);
-            
+
             // Get number of suspicious behaviors for this process
             NSString *processPath = esstring_to_nsstring(msg->process->executable->path);
             NSNumber *count = g_suspicious_behaviors[processPath];
-            
+
             // If this process has multiple suspicious behaviors, block sensitive file access
             if (count && [count intValue] >= SUSPICIOUS_BEHAVIOR_THRESHOLD) {
                 LOG_SECURITY("BLOCKING ACCESS (XProtect): Process has multiple suspicious behaviors: %@", processPath);
-                
+
                 // Send notification
                 send_security_notification(@"Suspicious Access Blocked",
                                          [NSString stringWithFormat:@"Blocked suspicious access to %@ by %@",
                                          filePath, processPath],
                                          true);
-                
+
                 return ES_AUTH_RESULT_DENY;
             }
         }
     }
-    
+
     return ES_AUTH_RESULT_ALLOW;
 }
 
@@ -1155,13 +1155,13 @@ es_auth_result_t auth_event_handler(const es_message_t *msg) {
     if(msg->process->is_es_client) {
         return ES_AUTH_RESULT_ALLOW;
     }
-    
+
     // Ignore events from root processes unless in Gatekeeper/XProtect mode
     if(0 == audit_token_to_ruid(msg->process->audit_token) &&
        !g_gatekeeper_mode && !g_xprotect_mode) {
         return ES_AUTH_RESULT_ALLOW;
     }
-    
+
     // Run enhanced Gatekeeper checks if enabled
     if (g_gatekeeper_mode) {
         es_auth_result_t gatekeeper_result = gatekeeper_auth_handler(msg);
@@ -1169,7 +1169,7 @@ es_auth_result_t auth_event_handler(const es_message_t *msg) {
             return ES_AUTH_RESULT_DENY;
         }
     }
-    
+
     // Run enhanced XProtect checks if enabled
     if (g_xprotect_mode) {
         es_auth_result_t xprotect_result = xprotect_auth_handler(msg);
@@ -1177,46 +1177,46 @@ es_auth_result_t auth_event_handler(const es_message_t *msg) {
             return ES_AUTH_RESULT_DENY;
         }
     }
-    
+
     // Block exec if path of process is in our blocked paths list
     if(ES_EVENT_TYPE_AUTH_EXEC == msg->event_type) {
         NSString *path = esstring_to_nsstring(msg->event.exec.target->executable->path);
-        
+
         if(![g_blocked_paths containsObject:path]) {
             return ES_AUTH_RESULT_ALLOW;
         }
-        
+
         // Process is in our blocked list
         LOG_IMPORTANT_INFO("BLOCKING EXEC: %@", path);
         return ES_AUTH_RESULT_DENY;
     }
-    
+
     // Block vim from accessing plain text files
     if(ES_EVENT_TYPE_AUTH_OPEN == msg->event_type) {
         NSString *processPath = esstring_to_nsstring(msg->process->executable->path);
-        
+
         if(![processPath isEqualToString:@"/usr/bin/vim"]) {
             // Not vim
             return ES_AUTH_RESULT_ALLOW;
         }
-        
+
         NSString *filePath = esstring_to_nsstring(msg->event.open.file->path);
-        
+
         if(is_system_file(filePath)) {
             // Ignore System files
             return ES_AUTH_RESULT_ALLOW;
         }
-        
+
         if(!is_plain_text_file(filePath)) {
             // Not a text file
             return ES_AUTH_RESULT_ALLOW;
         }
-        
+
         // Process is vim trying to access a text file
         LOG_IMPORTANT_INFO("BLOCKING OPEN: %@", filePath);
         return ES_AUTH_RESULT_DENY;
     }
-    
+
     // All good
     return ES_AUTH_RESULT_ALLOW;
 }
@@ -1228,28 +1228,28 @@ void respond_to_auth_event(es_client_t *clt, const es_message_t *msg, es_auth_re
     if(ES_AUTH_RESULT_DENY == result) {
         LOG_NON_VERBOSE_EVENT_MESSAGE(msg);
     }
-    
+
     // Note: You use es_respond_auth_result() to respond to auth events,
     // except for ES_EVENT_TYPE_AUTH_OPEN events, which require a response
     // using es_respond_flags_result() instead.
     if(ES_EVENT_TYPE_AUTH_OPEN == msg->event_type) {
         uint32_t authorized_flags = 0;
-        
+
         if(ES_AUTH_RESULT_ALLOW == result) {
             authorized_flags = msg->event.open.fflag;
         }
-        
+
         es_respond_result_t res =
             es_respond_flags_result(clt, msg, authorized_flags, g_cache_auth_results);
-        
+
         if(ES_RESPOND_RESULT_SUCCESS != res) {
             LOG_ERROR("es_respond_flags_result: %d", res);
         }
-        
+
     } else {
         es_respond_result_t res =
             es_respond_auth_result(clt, msg, result, g_cache_auth_results);
-        
+
         if(ES_RESPOND_RESULT_SUCCESS != res) {
             LOG_ERROR("es_respond_auth_result: %d", res);
         }
@@ -1261,12 +1261,12 @@ void respond_to_auth_event(es_client_t *clt, const es_message_t *msg, es_auth_re
 // Clean-up before exiting
 void sig_handler(int sig) {
     LOG_IMPORTANT_INFO("Tidying Up");
-    
+
     if(g_client) {
         es_unsubscribe_all(g_client);
         es_delete_client(g_client);
     }
-    
+
     LOG_IMPORTANT_INFO("Exiting");
     exit(EXIT_SUCCESS);
 }
@@ -1287,27 +1287,27 @@ void init_security_features(void) {
     g_suspicious_extensions = [NSSet setWithObjects:
                               @"app", @"dylib", @"kext", @"pkg",
                               @"dmg", @"sh", @"py", @"js", @"command", nil];
-    
+
     // Initialize malicious hash database (simplified)
     // In a real implementation, this would be loaded from an XProtect signature database
     g_malicious_hashes = [NSMutableSet setWithObjects:
                          @"e1112134b6dcc8bed54e0e34d8ac272795e73d74fc1bed74f5c716480d1bd60b", // Example hash
                          @"74865fb5bca5f883169ea308cc441137d36fb1663dd7749db3cc9e0880a8c51a", // Example hash
                          nil];
-    
+
     // Initialize notarization requirements (path -> requirement level)
     // 0 = disabled, 1 = developer ID signed, 2 = App Store only
     g_notarization_requirements = [NSMutableDictionary dictionaryWithObjectsAndKeys:
                                  @(GatekeeperPolicyAppStoreOnly), @"/Applications/Banking.app/Contents/MacOS/Banking",
                                  @(GatekeeperPolicyDeveloperIDSigned), @"/Applications/Developer.app/Contents/MacOS/Developer",
                                  nil];
-    
+
     // Initialize the quarantine status cache
     g_quarantine_status = [NSMutableDictionary new];
-    
+
     // Initialize the suspicious behaviors tracking
     g_suspicious_behaviors = [NSMutableDictionary new];
-    
+
     // Initialize the security preferences
     g_security_preferences = [NSMutableDictionary dictionaryWithObjectsAndKeys:
                             @(YES), @"BlockSuspiciousProcesses",
@@ -1315,23 +1315,23 @@ void init_security_features(void) {
                             @(YES), @"EnforceCodeSigning",
                             @(YES), @"CheckQuarantineFlag",
                             nil];
-    
+
     // Initialize notification queue
     g_notification_queue = dispatch_queue_create("com.security.notifications", DISPATCH_QUEUE_SERIAL);
-    
+
     LOG_IMPORTANT_INFO("Security features initialized");
 }
 
 // Example of an event message handler to process event messages serially from Endpoint Security.
 es_handler_block_t serial_message_handler = ^(es_client_t *clt, const es_message_t *msg) {
     // Endpoint Security, by default, calls a event message handler serially for each message.
-    
+
     LOG_VERBOSE_EVENT_MESSAGE(msg);
-    
+
     // NOTE: It is important to process events in a timely manner.
     // The kernel will start to drop events for the client if they are not responded to in time.
     detect_and_log_dropped_events(msg);
-    
+
     // Auth events require a response sent back before the deadline expires
     if(ES_ACTION_TYPE_AUTH == msg->action_type) {
         respond_to_auth_event(clt, msg, auth_event_handler(msg));
@@ -1342,35 +1342,35 @@ es_handler_block_t serial_message_handler = ^(es_client_t *clt, const es_message
 es_handler_block_t asynchronous_message_handler = ^(es_client_t *clt, const es_message_t *msg) {
     // Endpoint Security, by default, calls a event message handler serially for each message.
     // We copy/retain the message so that we can process and respond to auth events asynchronously.
-    
+
     LOG_VERBOSE_EVENT_MESSAGE(msg);
-    
+
     // NOTE: It is important to process events in a timely manner.
     // The kernel will start to drop events for the client if they are not responded to in time.
     detect_and_log_dropped_events(msg);
-    
+
     // Copy/Retain the event message so that we process the event asynchronously
     es_message_t *copied_msg = copy_message(msg);
-    
+
     if(!copied_msg) {
         LOG_ERROR("Failed to copy message");
         return;
     }
-    
+
     // Demonstrates handling events out of order, by processing 'ES_ACTION_TYPE_AUTH' events on
     // a separate thread.
     if(ES_ACTION_TYPE_AUTH == copied_msg->action_type) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^(void){
             es_auth_result_t result = auth_event_handler(copied_msg);
-            
+
             // Auth events require a response sent back before the deadline expires
             respond_to_auth_event(clt, copied_msg, result);
             free_message(copied_msg);
         });
-        
+
         return;
     }
-    
+
     // Free/release the message
     free_message(copied_msg);
 };
@@ -1380,11 +1380,11 @@ es_handler_block_t get_message_handler_from_commandline_args(int argc, const cha
         // No command line argument was given
         return nil;
     }
-    
+
     // check if verbose logging argument was given
     for (int i = 1; i < argc; i++) {
         NSString *arg = [[NSString stringWithUTF8String:argv[i]] lowercaseString];
-        
+
         if ([arg isEqualToString:@"verbose"]) {
             g_verbose_logging = true;
         } else if ([arg isEqualToString:@"gatekeeper"]) {
@@ -1393,19 +1393,19 @@ es_handler_block_t get_message_handler_from_commandline_args(int argc, const cha
             g_xprotect_mode = true;
         }
     }
-    
+
     // Try and find an event message handler that matches the first command line argument
     NSString *arg = [[NSString stringWithUTF8String:argv[1]] lowercaseString];
-    
+
     if ([arg isEqualToString:@"gatekeeper"] || [arg isEqualToString:@"xprotect"]) {
         return serial_message_handler;
     }
-    
+
     NSDictionary *handlers = @{
         @"serial" : serial_message_handler,
         @"asynchronous" : asynchronous_message_handler
     };
-    
+
     return [handlers objectForKey:arg];
 }
 
@@ -1413,18 +1413,18 @@ es_handler_block_t get_message_handler_from_commandline_args(int argc, const cha
 bool mute_path(const char* path)
 {
     es_return_t result = ES_RETURN_ERROR;
-    
+
     if(@available(macOS 12.0, *)) {
         result = es_mute_path(g_client, path, ES_MUTE_PATH_TYPE_LITERAL);
     } else {
         result = es_mute_path_literal(g_client, path);
     }
-    
+
     if(ES_RETURN_SUCCESS != result) {
         LOG_ERROR("mute_path: ES_RETURN_ERROR");
         return false;
     }
-    
+
     return true;
 }
 
@@ -1434,7 +1434,7 @@ bool setup_endpoint_security(void) {
     // Create a new client with an associated event message handler.
     // Requires 'com.apple.developer.endpoint-security.client' entitlement.
     es_new_client_result_t res = es_new_client(&g_client, g_handler);
-    
+
     if(ES_NEW_CLIENT_RESULT_SUCCESS != res) {
         switch(res) {
             case ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED:
@@ -1454,92 +1454,92 @@ bool setup_endpoint_security(void) {
             default:
                 LOG_ERROR("es_new_client: %d", res);
         }
-        
+
         return false;
     }
-    
+
     // Explicitly clear the cache of previous cached results from this demo or other ES Clients
     es_clear_cache_result_t resCache = es_clear_cache(g_client);
     if(ES_CLEAR_CACHE_RESULT_SUCCESS != resCache) {
         LOG_ERROR("es_clear_cache: %d", resCache);
         return false;
     }
-    
+
     // Build a list of events to subscribe to
     NSMutableArray *eventsList = [NSMutableArray arrayWithObjects:
                                @(ES_EVENT_TYPE_AUTH_EXEC),
                                @(ES_EVENT_TYPE_AUTH_OPEN),
                                @(ES_EVENT_TYPE_NOTIFY_FORK),
                                nil];
-    
+
     // Add XProtect and Gatekeeper specific events if enabled
     if (g_xprotect_mode) {
         // XProtect needs to monitor write and create events
         [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_CREATE)];
         [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_WRITE)];
-        
+
         if (@available(macOS 13.0, *)) {
             [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED)];
             [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED)];
         }
     }
-    
+
     if (g_gatekeeper_mode) {
         if (@available(macOS 15.0, *)) {
             [eventsList addObject:@(ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE)];
         }
     }
-    
+
     // Convert NSArray to C array
     es_event_type_t events[eventsList.count];
     for (NSUInteger i = 0; i < eventsList.count; i++) {
         events[i] = (es_event_type_t)[[eventsList objectAtIndex:i] intValue];
     }
-    
+
     // Subscribe to the events we're interested in
     es_return_t subscribed = es_subscribe(g_client, events, sizeof events / sizeof *events);
-    
+
     if(ES_RETURN_ERROR == subscribed) {
         LOG_ERROR("es_subscribe: ES_RETURN_ERROR");
         return false;
     }
-    
+
     // All good
     return log_subscribed_events();
 }
 
 int main(int argc, const char * argv[]) {
     signal(SIGINT, &sig_handler);
-    
+
     @autoreleasepool {
         // Init global vars
         g_handler = get_message_handler_from_commandline_args(argc, argv);
-        
+
         if(!g_handler) {
             print_usage(argv[0]);
             return 1;
         }
-        
+
         // Initialize date formatter and other tracking collections
         init_date_formater();
         g_seq_nums = [NSMutableDictionary new];
-        
+
         // Initialize security features if we're in security mode
         if (g_gatekeeper_mode || g_xprotect_mode) {
             init_security_features();
         }
-        
+
         // List of paths to be blocked.
         // For this demo we will block the top binary and Calculator app bundle.
         g_blocked_paths = [NSSet setWithObjects:
                           @"/usr/bin/top",
                           @"/System/Applications/Calculator.app/Contents/MacOS/Calculator",
                           nil];
-        
+
         if(!setup_endpoint_security()) {
             return 1;
         }
-        
+
         if(@available(macOS 12.0, *)) {
             // Note: Endpoint Security for performance reasons will automatically mute a set of paths
             // on creation of new clients ('es_new_client').
@@ -1551,19 +1551,19 @@ int main(int argc, const char * argv[]) {
             // this on older versions of macOS to prevent deadlocks in this program.
             mute_path("/usr/sbin/cfprefsd");
         }
-        
+
         // Log operating mode
         if (g_gatekeeper_mode) {
             LOG_IMPORTANT_INFO("Running in Gatekeeper emulation mode");
         }
-        
+
         if (g_xprotect_mode) {
             LOG_IMPORTANT_INFO("Running in XProtect emulation mode");
         }
-        
+
         // Start handling events from Endpoint Security
         dispatch_main();
     }
-    
+
     return 0;
 }

@@ -1,0 +1,9 @@
+{
+  "id": "table-editor-obsidian",
+  "name": "Advanced Tables",
+  "version": "0.17.3",
+  "minAppVersion": "0.15.0",
+  "description": "Enhanced table editing capabilities for Obsidian",
+  "author": "Tony Grosinger",
+  "isDesktopOnly": false
+}

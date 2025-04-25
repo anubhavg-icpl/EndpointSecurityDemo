@@ -1,4 +1,4 @@
-2# Security Features
+# Security Features
 
 EndpointSecurityDemo implements a comprehensive set of security features that emulate and extend the capabilities of macOS built-in security systems like Gatekeeper and XProtect.
 
@@ -94,22 +94,33 @@ sequenceDiagram
     end
 ```
 
-### Key Features
+### Implementation Details
 
-1. **Malware Signature Database**
-   - Maintains SHA-256 hashes of known malicious files
-   - Blocks execution of files matching malicious signatures
-   - Extensible database system for adding new threats
+The XProtect emulation is implemented with the following key components:
 
-2. **Suspicious Behavior Monitoring**
-   - Tracks suspicious activity by processes
-   - Implements threshold-based detection system
-   - Escalates security response based on behavior patterns
+```objectivec
+// Threat level classification
+typedef NS_ENUM(NSUInteger, ThreatLevel) {
+    ThreatLevelNone = 0,
+    ThreatLevelSuspicious = 1,
+    ThreatLevelMalicious = 2
+};
 
-3. **Sensitive File Access Control**
-   - Monitors access to critical system directories
-   - Controls access to sensitive user data
-   - Prevents potential data exfiltration
+// Core detection functions
+ThreatLevel analyze_file_threat_level(const char* path);
+NSString* calculate_file_hash(const char* path);
+bool has_suspicious_extension(const NSString* path);
+void record_suspicious_behavior(const es_process_t* proc);
+```
+
+### Malware Detection Methodology
+
+Our implementation uses a multi-layered approach:
+
+1. **Hash-based Detection**: Compares SHA-256 hashes against known malicious file signatures
+2. **Extension Analysis**: Monitors high-risk file extensions commonly associated with malware
+3. **Behavioral Analysis**: Tracks suspicious activities with a threshold-based scoring system
+4. **Sensitive Data Access Monitoring**: Watches for unauthorized access to critical system areas
 
 ## Security Notification System
 
@@ -147,3 +158,22 @@ The application implements configurable security policies that can be customized
    - Set thresholds for suspicious behavior
    - Define actions to take when thresholds are exceeded
    - Configure notification settings for security events
+
+## Corporate Deployment Considerations
+
+When deploying EndpointSecurityDemo in a corporate environment, consider the following:
+
+1. **Policy Configuration**
+   - Create standardized policies appropriate for your security requirements
+   - Consider different policy tiers for different user groups or device types
+   - Document exceptions for approved applications
+
+2. **Integration with SIEM**
+   - Forward security events to your corporate SIEM solution
+   - Establish alerting thresholds appropriate for your environment
+   - Correlate events with other security telemetry
+
+3. **Maintenance Requirements**
+   - Regular updates to malware signature database
+   - Periodic review of blocked application lists
+   - Adjustments to detection thresholds based on false positive rates

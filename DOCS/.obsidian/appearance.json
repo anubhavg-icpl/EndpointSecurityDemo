@@ -1,1 +1,12 @@
-{}
+{
+  "baseFontSize": 16,
+  "theme": "moonstone",
+  "enabledCssSnippets": ["corporate"],
+  "textFontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial",
+  "interfaceFontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial",
+  "monospaceFontFamily": "JetBrains Mono, Menlo, SFMono-Regular, Consolas, 'Liberation Mono', monospace",
+  "cssTheme": "Things",
+  "accentColor": "#3b82f6",
+  "nativeMenus": false,
+  "translucency": false
+}
