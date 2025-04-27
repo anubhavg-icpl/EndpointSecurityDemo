@@ -1,6 +1,6 @@
 # Security Features
 
-EndpointSecurityDemo implements a comprehensive set of security features that emulate and extend the capabilities of macOS built-in security systems like Gatekeeper and XProtect.
+EndpointSecurityDemo implements a file monitoring system that tracks critical file system operations using Apple's EndpointSecurity framework.
 
 ## Core Security Capabilities
 
@@ -9,171 +9,131 @@ mindmap
   root((Security Features))
     Event Monitoring
       Process Execution
-      File Access
-      System Changes
-    Access Control
-      Process Blocking
-      File Operation Control
-      Quarantine Enforcement
-    Threat Detection
-      Malicious File Detection
-      Behavior Analysis
-      Hash Validation
-    Notification System
-      User Alerts
-      Security Logging
-      Behavioral Tracking
+      File Write
+      File Deletion
+      File Renaming
+    Logging System
+      Timestamped Events
+      PID Tracking
+      Path Recording
+      Structured Logging
+    Signal Handling
+      Graceful Termination
+      Resource Cleanup
 ```
 
-## Gatekeeper Emulation
+## Event Monitoring
 
-The Gatekeeper functionality ensures that only trusted applications can execute on the system.
+The ESMonitor implementation monitors four critical system events:
 
-### Policy Levels
+### Process Execution Monitoring
 
 ```mermaid
 graph TD
-    A[File Execution Request] --> B{Gatekeeper Policy}
-    B -->|Disabled| C[Allow Execution]
-    B -->|Developer ID Signed| D{Check Signature}
-    B -->|App Store Only| E{Check App Store}
-
-    D -->|Valid Signature| F[Allow Execution]
-    D -->|Invalid Signature| G[Block Execution]
-
-    E -->|App Store App| H[Allow Execution]
-    E -->|Non-App Store App| I[Block Execution]
+    A[Kernel] -->|Process Execution| B{EndpointSecurity}
+    B -->|ES_EVENT_TYPE_NOTIFY_EXEC| C[ESMonitor]
+    C -->|Log Entry| D[Log File]
+    D --> E[Format: TIMESTAMP [PID] EXEC → path/to/executable]
 ```
 
-### Key Features
+Process execution monitoring captures when any process is started on the system, providing:
+- The timestamp of execution
+- The process ID (PID)
+- The full path to the executed binary
 
-1. **Code Signature Verification**
-   - Validates digital signatures on executable files
-   - Checks for valid Developer ID signatures
-   - Verifies Apple platform binaries
+### File Write Monitoring
 
-2. **Notarization Checking**
-   - Verifies that apps have been notarized by Apple
-   - Enforces hardened runtime requirements
-   - Provides path-based notarization policies
-
-3. **Quarantine Awareness**
-   - Identifies files downloaded from the internet
-   - Applies stricter verification to quarantined files
-   - Extracts quarantine metadata for security decisions
-
-## XProtect Emulation
-
-The XProtect functionality provides malware detection and prevention capabilities.
-
-### Threat Detection Process
+File write monitoring captures file modifications:
 
 ```mermaid
 sequenceDiagram
-    participant File
-    participant XProtect
-    participant Hash as Hash Database
-    participant Behavior as Behavior Monitor
+    participant App as Application
+    participant Kernel as macOS Kernel
+    participant ES as EndpointSecurity
+    participant Monitor as ESMonitor
+    participant Log as Log File
 
-    File->>XProtect: Request Execution/Access
-    XProtect->>Hash: Check File Hash
-    Hash-->>XProtect: Hash Match Result
-
-    alt Malicious Hash Found
-        XProtect->>File: Block Access
-    else No Match Found
-        XProtect->>XProtect: Analyze File Content
-        XProtect->>Behavior: Check Suspicious Behaviors
-        Behavior-->>XProtect: Behavior Analysis Result
-
-        alt Suspicious Behavior
-            XProtect->>File: Monitor Closely
-        else No Suspicious Behavior
-            XProtect->>File: Allow Access
-        end
-    end
+    App->>Kernel: Write to file
+    Kernel->>ES: Generate ES_EVENT_TYPE_NOTIFY_WRITE event
+    ES->>Monitor: Deliver event
+    Monitor->>Monitor: Format log entry
+    Monitor->>Log: Write "TIMESTAMP [PID] WRITE → path/to/file"
 ```
 
-### Implementation Details
+### File Deletion Monitoring
 
-The XProtect emulation is implemented with the following key components:
+File deletion monitoring captures when files are removed from the system:
 
-```objectivec
-// Threat level classification
-typedef NS_ENUM(NSUInteger, ThreatLevel) {
-    ThreatLevelNone = 0,
-    ThreatLevelSuspicious = 1,
-    ThreatLevelMalicious = 2
-};
+- Event Type: `ES_EVENT_TYPE_NOTIFY_UNLINK`
+- Log Format: `TIMESTAMP [PID] UNLINK → path/to/file`
 
-// Core detection functions
-ThreatLevel analyze_file_threat_level(const char* path);
-NSString* calculate_file_hash(const char* path);
-bool has_suspicious_extension(const NSString* path);
-void record_suspicious_behavior(const es_process_t* proc);
+### File Rename Monitoring
+
+File rename monitoring captures when files are renamed, tracking both source and destination:
+
+- Event Type: `ES_EVENT_TYPE_NOTIFY_RENAME`
+- Log Format:
+  - For existing destination: `TIMESTAMP [PID] RENAME → source_path → destination_path`
+  - For new path: `TIMESTAMP [PID] RENAME → source_path → directory_path/filename`
+
+## Logging System
+
+The application implements a robust file-based logging system that ensures security events are properly recorded:
+
+### Log File Security
+
+- Default Path: `/var/log/es_monitor.log`
+- Permissions: 644 (rw-r--r--)
+- Requires root privileges to write (application must be run with sudo)
+
+### Log Entry Structure
+
+Each log entry contains:
+1. ISO-8601 formatted timestamp with millisecond precision
+2. Process ID (PID) of the process performing the action
+3. Event type (EXEC, WRITE, UNLINK, RENAME)
+4. Relevant file paths
+
+Sample log entries:
+```
+2023-05-15 14:32:45.123 [PID 1234] EXEC → /usr/bin/ls
+2023-05-15 14:32:46.456 [PID 1235] WRITE → /Users/username/document.txt
+2023-05-15 14:32:47.789 [PID 1236] UNLINK → /Users/username/old_file.txt
+2023-05-15 14:32:48.012 [PID 1237] RENAME → /Users/username/file.txt → /Users/username/renamed.txt
 ```
 
-### Malware Detection Methodology
+## Security Considerations
 
-Our implementation uses a multi-layered approach:
+### Privilege Requirements
 
-1. **Hash-based Detection**: Compares SHA-256 hashes against known malicious file signatures
-2. **Extension Analysis**: Monitors high-risk file extensions commonly associated with malware
-3. **Behavioral Analysis**: Tracks suspicious activities with a threshold-based scoring system
-4. **Sensitive Data Access Monitoring**: Watches for unauthorized access to critical system areas
+EndpointSecurityDemo requires:
 
-## Security Notification System
+1. **Root Privileges**: Must be run with sudo to:
+   - Access the EndpointSecurity framework
+   - Write to the log file location
 
-The application includes a comprehensive notification system that alerts users to security events:
+2. **Special Entitlements**: Requires the com.apple.developer.endpoint-security.client entitlement:
+   ```xml
+   <key>com.apple.developer.endpoint-security.client</key>
+   <true/>
+   ```
 
-```mermaid
-flowchart LR
-    Event[Security Event] --> Analysis{Severity Analysis}
-    Analysis -->|Critical| CriticalAlert[Critical Alert]
-    Analysis -->|Warning| WarningAlert[Warning Alert]
-    Analysis -->|Info| InfoLog[Information Log]
+3. **Full Disk Access**: The Terminal application running EndpointSecurityDemo must have Full Disk Access permission in System Preferences.
 
-    CriticalAlert --> Notification[User Notification]
-    WarningAlert --> Notification
-    CriticalAlert --> Log[Security Log]
-    WarningAlert --> Log
-    InfoLog --> Log
-```
+### Security Use Cases
 
-## Enhanced Security Policies
+The implementation supports several security use cases:
 
-The application implements configurable security policies that can be customized for different environments:
+1. **File Integrity Monitoring**: Track modifications to critical system files
+2. **Process Execution Auditing**: Monitor which applications are being launched
+3. **Data Loss Prevention**: Detect file deletions and renames that might indicate data exfiltration
+4. **Security Forensics**: Provide an audit trail of file system activity for incident response
 
-1. **Execution Control Policies**
-   - Block specific applications by path
-   - Enforce code signing requirements
-   - Control execution of scripts and interpreters
+## Graceful Termination
 
-2. **File Access Policies**
-   - Monitor access to sensitive files
-   - Control which applications can access specific file types
-   - Prevent unauthorized modifications to system files
+The application implements proper signal handling to ensure secure termination:
 
-3. **Behavioral Analysis Policies**
-   - Set thresholds for suspicious behavior
-   - Define actions to take when thresholds are exceeded
-   - Configure notification settings for security events
-
-## Corporate Deployment Considerations
-
-When deploying EndpointSecurityDemo in a corporate environment, consider the following:
-
-1. **Policy Configuration**
-   - Create standardized policies appropriate for your security requirements
-   - Consider different policy tiers for different user groups or device types
-   - Document exceptions for approved applications
-
-2. **Integration with SIEM**
-   - Forward security events to your corporate SIEM solution
-   - Establish alerting thresholds appropriate for your environment
-   - Correlate events with other security telemetry
-
-3. **Maintenance Requirements**
-   - Regular updates to malware signature database
-   - Periodic review of blocked application lists
-   - Adjustments to detection thresholds based on false positive rates
+1. Captures SIGINT (Ctrl+C) signals
+2. Properly unsubscribes from EndpointSecurity events
+3. Closes the log file handle cleanly
+4. Frees resources and terminates with success status

@@ -7,25 +7,18 @@ EndpointSecurityDemo is built on Apple's EndpointSecurity framework, providing a
 ```mermaid
 graph TB
     Kernel[macOS Kernel] -- Events --> ESF[EndpointSecurity Framework]
-    ESF -- Notifications --> App[EndpointSecurityDemo App]
-    App -- Authorization Response --> ESF
-    App -- Logs --> Console[System Console]
-    App -- Notifications --> NotifCenter[Notification Center]
+    ESF -- Notifications --> App[ESMonitor Class]
+    App -- Logs --> LogFile[Event Log File]
 
     subgraph "EndpointSecurityDemo Components"
         Handler[Event Handler]
-        GK[Gatekeeper Module]
-        XP[XProtect Module]
         Logger[Logging System]
-        Rules[Security Rules]
+        SignalHandler[Signal Handler]
     end
 
     App --> Handler
-    Handler --> GK
-    Handler --> XP
-    Handler --> Logger
-    GK --> Rules
-    XP --> Rules
+    App --> Logger
+    App --> SignalHandler
 ```
 
 ## Event Flow Sequence
@@ -35,87 +28,99 @@ sequenceDiagram
     participant Kernel as macOS Kernel
     participant ESF as EndpointSecurity Framework
     participant Client as ES Client
-    participant Handler as Event Handler
-    participant Security as Security Modules
+    participant ESMonitor as ESMonitor Class
+    participant LogFile as Log File
 
     Kernel->>ESF: Generate system event
     ESF->>Client: Deliver event message
-    Client->>Handler: Process message (serial/async)
-
-    alt Auth Event
-        Handler->>Security: Evaluate against security policies
-        Security->>Handler: Return decision (allow/deny)
-        Handler->>ESF: Respond with authorization
-        ESF->>Kernel: Apply authorization decision
-    else Notify Event
-        Handler->>Security: Record event information
-        Security->>Handler: Update internal state
-    end
+    Client->>ESMonitor: Process message
+    ESMonitor->>ESMonitor: Format log entry
+    ESMonitor->>LogFile: Write log entry
 ```
 
 ## Component Architecture
 
 The application is structured into several key components:
 
-### 1. Event Handling System
+### 1. Core ESMonitor Class
 
-Two modes of operation are supported:
-- **Serial Message Handler**: Processes events one at a time in the order received
-- **Asynchronous Message Handler**: Processes events concurrently for improved performance
+The ESMonitor class serves as the central component that:
+- Initializes the EndpointSecurity client
+- Sets up the logging system
+- Handles incoming events
+- Manages cleanup on termination
 
-### 2. Security Modules
+### 2. Event Handling System
+
+The application monitors four critical event types:
+- **EXEC**: Process execution events
+- **WRITE**: File write operations
+- **UNLINK**: File deletion operations
+- **RENAME**: File rename operations
 
 ```mermaid
 classDiagram
-    class EndpointSecurityDemo {
+    class ESMonitor {
+        -es_client_t *_client
+        -NSFileHandle *_logFile
         +init()
-        +setup_endpoint_security()
-        +main()
+        +setupLogger()
+        +initializeESClient()
+        +setupSignalHandling()
+        +handleESMessage(es_message_t*)
+        +writeLogEntry(NSString*)
+        +currentTimestamp()
+        +cleanup()
+    }
+
+    class EndpointSecurityFramework {
+        +es_new_client()
+        +es_subscribe()
+        +es_unsubscribe_all()
+        +es_delete_client()
     }
 
     class EventHandler {
-        +serial_message_handler()
-        +asynchronous_message_handler()
-        +auth_event_handler()
-        +respond_to_auth_event()
+        +handleExecEvent()
+        +handleWriteEvent()
+        +handleUnlinkEvent()
+        +handleRenameEvent()
     }
 
-    class GatekeeperModule {
-        +gatekeeper_auth_handler()
-        +is_validly_signed()
-        +is_notarized()
+    class LoggingSystem {
+        +setupLogger()
+        +writeLogEntry()
+        +formatTimestamp()
     }
 
-    class XProtectModule {
-        +xprotect_auth_handler()
-        +analyze_file_threat_level()
-        +record_suspicious_behavior()
-    }
-
-    class SecurityUtils {
-        +calculate_file_hash()
-        +is_file_quarantined()
-        +get_quarantine_data()
-    }
-
-    EndpointSecurityDemo --> EventHandler
-    EventHandler --> GatekeeperModule
-    EventHandler --> XProtectModule
-    GatekeeperModule --> SecurityUtils
-    XProtectModule --> SecurityUtils
+    ESMonitor --> EndpointSecurityFramework : uses
+    ESMonitor --> EventHandler : contains
+    ESMonitor --> LoggingSystem : contains
 ```
 
-### 3. Data Flow
+### 3. Logging System
+
+EndpointSecurityDemo implements a robust file-based logging system that:
+- Creates a log file if it doesn't exist
+- Formats entries with timestamps and process information
+- Appends entries to the log file
+
+### 4. Signal Handling
+
+The application implements proper signal handling to ensure graceful termination:
+- Intercepts SIGINT (Ctrl+C) signals
+- Performs cleanup operations before termination
+- Ensures all resources are properly released
+
+## Data Flow
 
 ```mermaid
 flowchart LR
-    Event[System Event] --> Processing[Event Processing]
-    Processing --> Analysis[Security Analysis]
-    Analysis --> Decision{Decision}
-    Decision -- Allow --> AllowAction[Allow Action]
-    Decision -- Deny --> DenyAction[Deny Action]
-    Decision -- Log --> LoggingSystem[Logging System]
-    Decision -- Notify --> NotificationSystem[Notification System]
+    Event[System Event] --> ESFramework[EndpointSecurity Framework]
+    ESFramework --> ESMonitor[ESMonitor]
+    ESMonitor --> EventProcessing[Event Processing]
+    EventProcessing --> LogFormatting[Log Formatting]
+    LogFormatting --> LogFile[Log File]
 ```
 
 ## Technical Implementation
@@ -124,7 +129,6 @@ The application is implemented in Objective-C, leveraging the following key fram
 
 - **EndpointSecurity.framework**: Core framework for system event monitoring
 - **libbsm.tbd**: For Audit Token functions
-- **UniformTypeIdentifiers.framework**: For file type identification
-- **Security.framework**: For cryptographic operations
+- **Foundation.framework**: For core Objective-C functionality
 
 Communication with the EndpointSecurity framework happens through a client connection established with `es_new_client()` and subscription to specific event types with `es_subscribe()`.

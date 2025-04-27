@@ -4,260 +4,229 @@ This document provides a comprehensive overview of the EndpointSecurityDemo impl
 
 ## Codebase Organization
 
-The EndpointSecurityDemo application is implemented primarily in Objective-C and leverages Apple's EndpointSecurity framework. The codebase is organized into several logical sections:
+The EndpointSecurityDemo application is implemented primarily in Objective-C and leverages Apple's EndpointSecurity framework. The application uses a class-based architecture centered around the ESMonitor class:
 
 ```mermaid
 graph TB
-    Main[main.m] --> Init[Initialization]
-    Init --> ESSetup[EndpointSecurity Setup]
-    Init --> SecuritySetup[Security Features Setup]
+    Main[main.m] --> ESMonitor[ESMonitor Class]
 
-    ESSetup --> EventHandlers[Event Handlers]
-    EventHandlers --> SerialHandler[Serial Handler]
-    EventHandlers --> AsyncHandler[Asynchronous Handler]
+    ESMonitor --> Init[Initialization]
+    ESMonitor --> Logging[Logging System]
+    ESMonitor --> EventHandling[Event Handling]
+    ESMonitor --> Cleanup[Signal Handling & Cleanup]
 
-    SecuritySetup --> GatekeeperModule[Gatekeeper Module]
-    SecuritySetup --> XProtectModule[XProtect Module]
+    Init --> SetupLogger[Setup Logger]
+    Init --> InitializeESClient[Initialize ES Client]
+    Init --> SetupSignalHandling[Setup Signal Handling]
 
-    EventHandlers --> AuthHandler[Authorization Handler]
-    AuthHandler --> GatekeeperModule
-    AuthHandler --> XProtectModule
+    EventHandling --> HandleESMessage[Handle ES Messages]
+    EventHandling --> ProcessEvents[Process Different Event Types]
 
-    GatekeeperModule --> SecurityUtils[Security Utilities]
-    XProtectModule --> SecurityUtils
+    Logging --> WriteLogEntry[Write Log Entries]
+    Logging --> FormatTimestamp[Format Timestamps]
 ```
 
 ## Key Components
 
-### 1. Initialization System
+### 1. ESMonitor Class
 
-The application begins in the `main()` function, which performs the following steps:
+The core of the application is the `ESMonitor` class which handles EndpointSecurity events and logging:
+
+```objectivec
+@interface ESMonitor : NSObject {
+@private
+    es_client_t *_client;
+    NSFileHandle *_logFile;
+}
+
+- (void)setupLogger;
+- (void)initializeESClient;
+- (void)setupSignalHandling;
+- (void)handleESMessage:(const es_message_t *)message;
+- (void)writeLogEntry:(NSString *)entry;
+- (void)cleanup;
+- (NSString *)currentTimestamp;
+@end
+```
+
+### 2. Initialization System
+
+The application initializes the ESMonitor in the `main()` function:
 
 ```objectivec
 int main(int argc, const char * argv[]) {
-    signal(SIGINT, &sig_handler);
-
     @autoreleasepool {
-        // Init global vars
-        g_handler = get_message_handler_from_commandline_args(argc, argv);
-
-        // Initialize date formatter and other tracking collections
-        init_date_formater();
-        g_seq_nums = [NSMutableDictionary new];
-
-        // Initialize security features if we're in security mode
-        if (g_gatekeeper_mode || g_xprotect_mode) {
-            init_security_features();
-        }
-
-        // List of paths to be blocked
-        g_blocked_paths = [NSSet setWithObjects: /* paths */ nil];
-
-        if(!setup_endpoint_security()) {
-            return 1;
-        }
-
-        // Start handling events from Endpoint Security
+        NSLog(@"[INFO] Starting EndpointSecurity monitor…");
+        __unused ESMonitor *mon = [[ESMonitor alloc] init];
         dispatch_main();
     }
-
-    return 0;
+    return EXIT_SUCCESS;
 }
 ```
 
-### 2. EndpointSecurity Client Setup
-
-The `setup_endpoint_security()` function creates and configures the EndpointSecurity client:
+The ESMonitor initialization performs several key setup tasks:
 
 ```objectivec
-bool setup_endpoint_security(void) {
-    // Create a new client with an associated event message handler
-    es_new_client_result_t res = es_new_client(&g_client, g_handler);
-
-    // Clear cache of previous results
-    es_clear_cache_result_t resCache = es_clear_cache(g_client);
-
-    // Build a list of events to subscribe to
-    NSMutableArray *eventsList = [NSMutableArray arrayWithObjects: /* event types */ nil];
-
-    // Subscribe to the events we're interested in
-    es_return_t subscribed = es_subscribe(g_client, events, sizeof events / sizeof *events);
-
-    return log_subscribed_events();
-}
-```
-
-### 3. Event Handling
-
-The application implements two event handlers:
-
-#### Serial Message Handler
-
-```objectivec
-es_handler_block_t serial_message_handler = ^(es_client_t *clt, const es_message_t *msg) {
-    LOG_VERBOSE_EVENT_MESSAGE(msg);
-    detect_and_log_dropped_events(msg);
-
-    if(ES_ACTION_TYPE_AUTH == msg->action_type) {
-        respond_to_auth_event(clt, msg, auth_event_handler(msg));
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        [self setupLogger];
+        [self initializeESClient];
+        [self setupSignalHandling];
     }
-};
+    return self;
+}
 ```
 
-#### Asynchronous Message Handler
+### 3. EndpointSecurity Client Setup
+
+The `initializeESClient` method creates and configures the EndpointSecurity client:
 
 ```objectivec
-es_handler_block_t asynchronous_message_handler = ^(es_client_t *clt, const es_message_t *msg) {
-    LOG_VERBOSE_EVENT_MESSAGE(msg);
-    detect_and_log_dropped_events(msg);
+- (void)initializeESClient {
+    es_new_client_result_t res = es_new_client(&_client, ^(es_client_t *client, const es_message_t *msg) {
+        [self handleESMessage:msg];
+    });
 
-    es_message_t *copied_msg = copy_message(msg);
+    // Subscribe to specific events
+    es_event_type_t evts[] = {
+        ES_EVENT_TYPE_NOTIFY_EXEC,
+        ES_EVENT_TYPE_NOTIFY_WRITE,
+        ES_EVENT_TYPE_NOTIFY_UNLINK,
+        ES_EVENT_TYPE_NOTIFY_RENAME
+    };
+    es_return_t sub = es_subscribe(_client, evts, sizeof(evts)/sizeof(evts[0]));
+}
+```
 
-    if(ES_ACTION_TYPE_AUTH == copied_msg->action_type) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^(void){
-            es_auth_result_t result = auth_event_handler(copied_msg);
-            respond_to_auth_event(clt, copied_msg, result);
-            free_message(copied_msg);
-        });
-        return;
+### 4. Event Handling
+
+The application handles EndpointSecurity events through the `handleESMessage` method:
+
+```objectivec
+- (void)handleESMessage:(const es_message_t *)message {
+    pid_t pid = audit_token_to_pid(message->process->audit_token);
+    NSString *entry = nil;
+
+    // Process different event types: EXEC, WRITE, UNLINK, RENAME
+    switch (message->event_type) {
+        case ES_EVENT_TYPE_NOTIFY_EXEC:
+            // Handle process execution events
+            break;
+
+        case ES_EVENT_TYPE_NOTIFY_WRITE:
+            // Handle file write events
+            break;
+
+        // Other event types...
     }
 
-    free_message(copied_msg);
-};
+    // Log the event if applicable
+    if (entry) {
+        [self writeLogEntry:entry];
+    }
+}
 ```
 
-## Security Features Implementation
+## Logging System
 
-### Gatekeeper Module
+The application implements a file-based logging system:
 
-The Gatekeeper functionality is implemented through the following key functions:
+### 1. Logger Setup
 
 ```objectivec
-// Check if a process is validly signed according to Gatekeeper policy
-bool is_validly_signed(const es_process_t* proc, GatekeeperPolicyLevel policy_level) {
-    // Code signature verification logic
-}
+- (void)setupLogger {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *logPath = @"/var/log/es_monitor.log";
 
-// Check if an app has been notarized
-bool is_notarized(const es_process_t* proc) {
-    return (proc->codesigning_flags & CS_RUNTIME) == CS_RUNTIME;
-}
+    // Create log file if it doesn't exist
+    if (![fm fileExistsAtPath:logPath]) {
+        BOOL ok = [fm createFileAtPath:logPath
+                              contents:nil
+                            attributes:@{ NSFilePosixPermissions:@0644 }];
+    }
 
-// Enhanced handler for Gatekeeper-style checks
-es_auth_result_t gatekeeper_auth_handler(const es_message_t *msg) {
-    // Authorization decision logic based on Gatekeeper policies
+    // Open log file for writing
+    NSError *err = nil;
+    _logFile = [NSFileHandle fileHandleForWritingToURL:[NSURL fileURLWithPath:logPath]
+                                                error:&err];
+    [_logFile seekToEndOfFile];
 }
 ```
 
-### XProtect Module
-
-The XProtect functionality is implemented through these key functions:
+### 2. Log Entry Writing
 
 ```objectivec
-// Check if a file might be malware based on content analysis
-ThreatLevel analyze_file_threat_level(const char* path) {
-    // Malware detection logic
-}
-
-// Record suspicious behavior
-void record_suspicious_behavior(const es_process_t* proc) {
-    // Behavior tracking logic
-}
-
-// Enhanced handler for XProtect-style malware detection
-es_auth_result_t xprotect_auth_handler(const es_message_t *msg) {
-    // Malware prevention logic
+- (void)writeLogEntry:(NSString *)entry {
+    NSData *d = [[entry stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+    @try {
+        [_logFile writeData:d];
+    } @catch (NSException *ex) {
+        NSLog(@"[ERROR] Log write failed: %@", ex.reason);
+    }
 }
 ```
+
+### 3. Timestamp Formatting
+
+```objectivec
+- (NSString *)currentTimestamp {
+    static NSDateFormatter *fmt;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        fmt = [[NSDateFormatter alloc] init];
+        fmt.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+        fmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    });
+    return [fmt stringFromDate:[NSDate date]];
+}
+```
+
+## Signal Handling and Cleanup
+
+The application handles termination signals gracefully:
+
+```objectivec
+- (void)setupSignalHandling {
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+    dispatch_source_t src = dispatch_source_create(
+      DISPATCH_SOURCE_TYPE_SIGNAL, SIGINT, 0, dispatch_get_main_queue());
+    dispatch_source_set_event_handler(src, ^{
+        [self cleanup];
+        exit(EXIT_SUCCESS);
+    });
+    dispatch_resume(src);
+}
+
+- (void)cleanup {
+    if (_client) {
+        es_unsubscribe_all(_client);
+        es_delete_client(_client);
+        _client = NULL;
+    }
+    [_logFile closeFile];
+}
+```
+
+## Monitored Events
+
+The application monitors four key file system events:
+
+1. **Process Execution (EXEC)**: Tracks when new processes are executed
+2. **File Write (WRITE)**: Monitors write operations to files
+3. **File Deletion (UNLINK)**: Captures file deletion operations
+4. **File Rename (RENAME)**: Tracks file rename operations with source and destination paths
 
 ## Performance Considerations
 
-### Event Handling Efficiency
+The implementation uses several techniques to ensure good performance:
 
-To maintain system performance, the application implements several optimization strategies:
-
-1. **Event Filtering**: Subscribes only to necessary event types
-2. **Path Muting**: Mutes high-volume paths to reduce event processing load
-3. **Asynchronous Processing**: Offers an asynchronous handler for high-volume environments
-4. **Caching**: Options for caching authorization responses
-
-```objectivec
-// Mute high-volume paths
-bool mute_path(const char* path) {
-    if(@available(macOS 12.0, *)) {
-        result = es_mute_path(g_client, path, ES_MUTE_PATH_TYPE_LITERAL);
-    } else {
-        result = es_mute_path_literal(g_client, path);
-    }
-}
-```
-
-### Memory Management
-
-The application carefully manages memory, especially for event messages:
-
-```objectivec
-// On macOS Big Sur 11+, Apple have deprecated es_copy_message in favour of es_retain_message
-es_message_t * copy_message(const es_message_t * msg) {
-    if(@available(macOS 11.0, *)) {
-        es_retain_message(msg);
-        return (es_message_t*) msg;
-    } else {
-        return es_copy_message(msg);
-    }
-}
-
-// On macOS Big Sur 11+, Apple have deprecated es_free_message in favour of es_release_message
-void free_message(es_message_t * _Nonnull msg) {
-    if(@available(macOS 11.0, *)) {
-        es_release_message(msg);
-    } else {
-        es_free_message(msg);
-    }
-}
-```
+1. **Selective Event Monitoring**: Only subscribes to specific event types
+2. **Efficient Timestamp Generation**: Uses dispatch_once for one-time initialization of date formatter
+3. **Asynchronous Signal Handling**: Uses GCD for handling termination signals
+4. **Error Handling**: Robust error handling around file operations
 
 ## Cross-Platform Compatibility
 
-The application is designed to work across multiple macOS versions, with conditional code that adapts to API changes:
-
-```objectivec
-// Example of version-specific code
-if(@available(macOS 12.0, *)) {
-    // Use macOS 12+ APIs
-    log_muted_paths_events();
-} else {
-    // Use legacy APIs
-    mute_path("/usr/sbin/cfprefsd");
-}
-```
-
-## Logging and Telemetry
-
-The application implements a comprehensive logging system:
-
-```objectivec
-#define LOG_IMPORTANT_INFO(fmt, ...) NSLog(@"*** " fmt @" ***", ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...) NSLog(@"%*s" fmt, g_log_indent, "", ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) NSLog(@"ERROR: " fmt, ##__VA_ARGS__)
-#define LOG_SECURITY(fmt, ...) NSLog(@"SECURITY: " fmt, ##__VA_ARGS__)
-```
-
-## Security Notification System
-
-The application implements a notification system to alert users to security events:
-
-```objectivec
-void send_security_notification(NSString *title, NSString *message, bool is_critical) {
-    dispatch_async(g_notification_queue, ^{
-        NSUserNotification *notification = [[NSUserNotification alloc] init];
-        notification.title = title;
-        notification.informativeText = message;
-        notification.soundName = is_critical ? NSUserNotificationDefaultSoundName : nil;
-
-        [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
-
-        LOG_IMPORTANT_INFO("SECURITY ALERT: %@ - %@", title, message);
-    });
-}
-```
+The application is designed to work on macOS 10.15 (Catalina) and later, which supports the EndpointSecurity framework.
