@@ -7,7 +7,7 @@ This guide provides detailed instructions for setting up and running the Endpoin
 Before beginning the setup process, ensure you have the following:
 
 - macOS Catalina 10.15 or later
-- Xcode 16 or later (tested with Version 16.2)
+- Xcode 12 or later
 - An Apple Developer account with the ability to request special entitlements
 - Administrative access to your macOS system
 
@@ -65,16 +65,8 @@ flowchart TD
 EndpointSecurityDemo must be run from Terminal with administrative privileges:
 
 ```bash
-sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo [mode] [verbose]
+sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo
 ```
-
-Where `[mode]` is one of:
-- `serial` - Uses the serial event processing mode
-- `asynchronous` - Uses asynchronous event processing mode
-- `gatekeeper` - Runs with enhanced Gatekeeper functionality
-- `xprotect` - Runs with enhanced XProtect functionality
-
-The optional `verbose` parameter enables detailed logging.
 
 ### System Permissions
 
@@ -87,10 +79,50 @@ The Terminal application must have Full Disk Access permission:
 5. Click the lock icon to make changes (requires admin password)
 6. Add Terminal.app to the list of allowed applications
 
+## Log File Location
+
+The application logs events to:
+
+```
+/var/log/es_monitor.log
+```
+
+You can view the log in real-time using:
+
+```bash
+sudo tail -f /var/log/es_monitor.log
+```
+
 ## Verification
 
 To verify that the application is running correctly:
 
-1. Run the application with the `verbose` flag
-2. Look for the "Subscribed Events" message in the output
-3. Try executing a program like `/usr/bin/top` which should be blocked by default
+1. Start the application with sudo
+2. Execute a command in another terminal window, like `ls`
+3. Check the log file for the corresponding EXEC event
+4. Create, modify, and delete files to verify WRITE, UNLINK, and RENAME events
+
+## Monitoring Events
+
+The application monitors four types of events:
+
+1. **EXEC**: Process execution
+   - Example: `/bin/ls` being executed
+
+2. **WRITE**: File write operations
+   - Example: Saving a document in TextEdit
+
+3. **UNLINK**: File deletion
+   - Example: Moving a file to Trash or using `rm`
+
+4. **RENAME**: File rename operations
+   - Example: Renaming a file in Finder or using `mv`
+
+## Termination
+
+To stop the application, press Ctrl+C in the terminal where it's running. The application will:
+
+1. Unsubscribe from EndpointSecurity events
+2. Delete the EndpointSecurity client
+3. Close the log file
+4. Exit gracefully

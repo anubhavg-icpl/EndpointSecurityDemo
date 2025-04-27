@@ -36,11 +36,10 @@ flowchart TD
 
 **Solutions:**
 1. Ensure all required frameworks are linked:
-   - libEndpointSecurity.tbd
+   - EndpointSecurity.framework
    - libbsm.tbd
-   - UniformTypeIdentifiers.framework (weak link)
 
-2. Verify your Xcode version is 16 or later.
+2. Verify your Xcode version is 12 or later.
 
 3. Check that the macOS deployment target is set to 10.15 or later.
 
@@ -63,129 +62,152 @@ flowchart TD
 
 ### Runtime Issues
 
-#### Issue: "Application lacks Transparency, Consent, and Control (TCC) approval" error
+#### Issue: "Operation not permitted" when running the application
 
 **Possible Causes:**
 - Terminal doesn't have Full Disk Access
+- Not running the application as root
 
 **Solutions:**
-1. Open System Preferences > Security & Privacy > Privacy > Full Disk Access
-2. Add Terminal.app to the list of applications
-3. Restart Terminal and try running the application again
+1. Grant Terminal Full Disk Access:
+   - Open System Preferences > Security & Privacy > Privacy > Full Disk Access
+   - Add Terminal.app to the list of allowed applications
+   - Restart Terminal
 
-#### Issue: "Application needs to be run as root" error
-
-**Possible Causes:**
-- Not running the application with sudo
-
-**Solutions:**
-1. Always run the application with sudo:
+2. Run the application with sudo:
    ```bash
-   sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo serial
+   sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo
    ```
 
-#### Issue: Event messages being dropped by the kernel
+#### Issue: "Could not create log file" error
 
 **Possible Causes:**
-- High volume of events
-- Slow processing of events
-- Insufficient resources
+- Insufficient permissions to write to /var/log
+- Directory doesn't exist
+- Disk space issues
 
 **Solutions:**
-1. Use the asynchronous message handler for better performance:
+1. Ensure you're running the application with sudo
+
+2. Check permissions on the /var/log directory:
    ```bash
-   sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo asynchronous
+   ls -la /var/log
    ```
 
-2. Reduce the number of event types subscribed to.
-
-3. Implement path muting for high-volume paths:
-   ```objectivec
-   es_mute_path(client, "/path/to/mute", ES_MUTE_PATH_TYPE_LITERAL);
+3. Verify available disk space:
+   ```bash
+   df -h
    ```
 
-### Security Policy Issues
-
-#### Issue: Application is incorrectly blocking legitimate processes
+#### Issue: No events being logged
 
 **Possible Causes:**
-- Overly restrictive security policies
-- Path conflicts with system processes
+- EndpointSecurity client not initialized properly
+- Event subscription failed
+- Log file writing issues
 
 **Solutions:**
-1. Update the blocked paths list to exclude necessary system utilities:
-   ```objectivec
-   g_blocked_paths = [NSSet setWithObjects:
-                     @"/path/to/block",
-                     nil];
+1. Check if EndpointSecurityDemo is running:
+   ```bash
+   ps aux | grep EndpointSecurityDemo
    ```
 
-2. Modify the Gatekeeper policy level in the security preferences.
+2. Check the system log for EndpointSecurity errors:
+   ```bash
+   sudo log show --predicate 'subsystem == "com.apple.endpointsecurity"' --last 5m
+   ```
 
-#### Issue: Malware detection generating false positives
+3. Verify the log file exists and is writable:
+   ```bash
+   ls -la /var/log/es_monitor.log
+   ```
+
+## EndpointSecurity Specific Issues
+
+### Issue: ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED error
 
 **Possible Causes:**
-- Suspicious extension list too broad
-- Behavior thresholds too sensitive
+- Missing entitlement in the application binary
+- Invalid code signature
 
 **Solutions:**
-1. Adjust the suspicious file extensions list:
-   ```objectivec
-   g_suspicious_extensions = [NSSet setWithObjects:
-                            @"app", @"dylib", @"kext",
-                            nil];
+1. Check the application's entitlements:
+   ```bash
+   codesign -d --entitlements :- /path/to/EndpointSecurityDemo.app
    ```
 
-2. Increase the suspicious behavior threshold:
-   ```objectivec
-   #define SUSPICIOUS_BEHAVIOR_THRESHOLD 5  // Increased from 3
+2. Verify the application is correctly signed:
+   ```bash
+   codesign -vvv /path/to/EndpointSecurityDemo.app
    ```
 
-## Logging and Debugging
+3. Re-sign the application with the correct entitlements:
+   ```bash
+   codesign --force --options runtime --sign "Developer ID Application: Your Name (TEAM_ID)" --entitlements /path/to/entitlements.plist /path/to/EndpointSecurityDemo.app
+   ```
 
-### Enabling Verbose Logging
+### Issue: ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED error
 
-To enable detailed logging for troubleshooting:
+**Possible Causes:**
+- Application not running as root
 
+**Solution:**
+Always run the application with sudo:
 ```bash
-sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo serial verbose
+sudo ./EndpointSecurityDemo.app/Contents/MacOS/EndpointSecurityDemo
 ```
 
-### Checking Subscribed Events
+### Issue: ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED error
 
-To verify which events the application is subscribed to:
+**Possible Causes:**
+- Terminal lacks Full Disk Access
+- TCC database issues
 
-```objectivec
-bool log_subscribed_events(void) {
-    size_t count = 0;
-    es_event_type_t *events = NULL;
-    es_return_t result = es_subscriptions(g_client, &count, &events);
+**Solutions:**
+1. Grant Terminal Full Disk Access as described earlier
 
-    if(ES_RETURN_SUCCESS != result) {
-        LOG_ERROR("es_subscriptions: ES_RETURN_ERROR");
-        return false;
-    }
+2. Reset the TCC database (caution: this will reset all privacy preferences):
+   ```bash
+   tccutil reset All
+   ```
 
-    LOG_IMPORTANT_INFO("Subscribed Events: %@", events_str(count, events));
+## Log File Issues
 
-    free(events);
-    return true;
-}
-```
+### Issue: Cannot view log file
 
-### Monitoring Dropped Events
+**Possible Causes:**
+- Insufficient permissions
+- Log file not created
 
-The application automatically detects and logs dropped events. Look for messages like:
+**Solutions:**
+1. Use sudo to view the log:
+   ```bash
+   sudo cat /var/log/es_monitor.log
+   ```
 
-```
-ERROR: EVENTS DROPPED! seq_num is ahead by: 5
-```
+2. Monitor the log in real-time:
+   ```bash
+   sudo tail -f /var/log/es_monitor.log
+   ```
 
-or
+### Issue: Log file growing too large
 
-```
-ERROR: EVENTS DROPPED! global_seq_num is ahead by: 3
-```
+**Possible Causes:**
+- Many events being logged over time
+- No log rotation
+
+**Solutions:**
+1. Implement log rotation by adding a configuration to /etc/newsyslog.d/:
+   ```
+   # Create file: /etc/newsyslog.d/es_monitor.conf
+   /var/log/es_monitor.log 644 10 1000 * JN
+   ```
+
+2. Manually rotate the log when needed:
+   ```bash
+   sudo mv /var/log/es_monitor.log /var/log/es_monitor.log.old
+   sudo kill -HUP $(pgrep EndpointSecurityDemo)
+   ```
 
 ## Advanced Troubleshooting
 
@@ -202,16 +224,16 @@ For testing purposes, you may need to run in a System Integrity Protection (SIP)
 
 ### Debugging Process Behavior
 
-To get more information about process behavior:
+To get more information about the processes being monitored:
 
 ```bash
 sudo fs_usage -f filesystem | grep [process_name]
 ```
 
-### Inspecting Code Signing
+### Checking Event Monitoring
 
-To manually verify code signing status:
+To verify which events are being monitored by EndpointSecurity system-wide:
 
 ```bash
-codesign -dvvv [path_to_binary]
+sudo log stream --predicate 'subsystem == "com.apple.endpointsecurity"' --level debug
 ```
